@@ -1,4 +1,4 @@
-"""Cut and style clips with ffmpeg (reframe + burned-in captions)."""
+"""Cut and style clips with ffmpeg (auto-reframe + animated captions)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,11 @@ import os
 import shutil
 import subprocess
 import tempfile
-from typing import List
+from typing import List, Optional, Tuple
 
 from .config import RenderOptions
 from .highlights import Highlight
+from .reframe import build_track_crop, compute_face_track
 from .transcribe import Word
 
 
@@ -17,39 +18,10 @@ def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
-# --- Subtitles ------------------------------------------------------------
-
-def _fmt_ts(seconds: float) -> str:
-    if seconds < 0:
-        seconds = 0.0
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int(round((seconds - int(seconds)) * 1000))
-    if ms == 1000:
-        ms = 999
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
-def build_srt(words: List[Word], clip_start: float, words_per_line: int) -> str:
-    """Group word timestamps (rebased to the clip) into short caption cues."""
-    lines: List[str] = []
-    idx = 1
-    for i in range(0, len(words), words_per_line):
-        chunk = words[i : i + words_per_line]
-        if not chunk:
-            continue
-        start = max(0.0, chunk[0].start - clip_start)
-        end = max(start + 0.3, chunk[-1].end - clip_start)
-        text = " ".join(w.text for w in chunk).strip()
-        if not text:
-            continue
-        lines.append(str(idx))
-        lines.append(f"{_fmt_ts(start)} --> {_fmt_ts(end)}")
-        lines.append(text)
-        lines.append("")
-        idx += 1
-    return "\n".join(lines)
+_TARGETS = {
+    "9:16": (1080, 1920),
+    "1:1": (1080, 1080),
+}
 
 
 def _collect_words(h: Highlight) -> List[Word]:
@@ -59,47 +31,145 @@ def _collect_words(h: Highlight) -> List[Word]:
     return words
 
 
-# --- Filtergraph ----------------------------------------------------------
-
-_TARGETS = {
-    "9:16": (1080, 1920),
-    "1:1": (1080, 1080),
-}
-
-
 def _escape_for_filter(path: str) -> str:
-    # ffmpeg filter arg escaping: backslash, colon and single quotes.
     return path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
 
-def _reframe_chain(opts: RenderOptions, label_in: str, label_out: str) -> str:
-    if opts.aspect == "original" or opts.aspect not in _TARGETS:
-        return f"[{label_in}]null[{label_out}]"
+# --- Plain SRT captions ---------------------------------------------------
 
+def _fmt_srt(seconds: float) -> str:
+    seconds = max(0.0, seconds)
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = min(999, int(round((seconds - int(seconds)) * 1000)))
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def build_srt(words: List[Word], clip_start: float, per_line: int) -> str:
+    lines: List[str] = []
+    idx = 1
+    for i in range(0, len(words), per_line):
+        chunk = words[i : i + per_line]
+        if not chunk:
+            continue
+        start = max(0.0, chunk[0].start - clip_start)
+        end = max(start + 0.3, chunk[-1].end - clip_start)
+        text = " ".join(w.text for w in chunk).strip()
+        if not text:
+            continue
+        lines += [str(idx), f"{_fmt_srt(start)} --> {_fmt_srt(end)}", text, ""]
+        idx += 1
+    return "\n".join(lines)
+
+
+# --- Karaoke (word-by-word) ASS captions ----------------------------------
+
+def _fmt_ass(seconds: float) -> str:
+    seconds = max(0.0, seconds)
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    cs = min(99, int(round((seconds - int(seconds)) * 100)))
+    return f"{h:d}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def build_ass(
+    words: List[Word],
+    clip_start: float,
+    per_line: int,
+    target_w: int,
+    target_h: int,
+    font_size: int,
+) -> str:
+    """ASS subtitles with a karaoke sweep: each word lights up as it's said."""
+    fontsize = max(24, round(target_h * font_size / 400))
+    margin_v = round(target_h * 0.12)
+    margin_h = round(target_w * 0.06)
+
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {target_w}\nPlayResY: {target_h}\n"
+        "WrapStyle: 2\nScaledBorderAndShadow: yes\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        # Primary (sung) = bright yellow, Secondary (not yet) = white.
+        f"Style: Pop,Arial,{fontsize},&H0000FFFF,&H00FFFFFF,&H00000000,"
+        f"&H64000000,-1,0,0,0,100,100,0,0,1,4,2,2,{margin_h},{margin_h},"
+        f"{margin_v},1\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "
+        "MarginV, Effect, Text\n"
+    )
+
+    events: List[str] = []
+    for i in range(0, len(words), per_line):
+        chunk = words[i : i + per_line]
+        chunk = [w for w in chunk if w.text.strip()]
+        if not chunk:
+            continue
+        start = max(0.0, chunk[0].start - clip_start)
+        end = max(start + 0.3, chunk[-1].end - clip_start)
+
+        # Build the karaoke body: each word gets a \k of its spoken length.
+        body_parts: List[str] = []
+        prev_end = chunk[0].start
+        for w in chunk:
+            gap = max(0.0, w.start - prev_end)
+            if gap > 0.02:
+                body_parts.append(f"{{\\k{int(round(gap * 100))}}}")
+            dur = max(1, int(round((w.end - w.start) * 100)))
+            text = w.text.strip().replace("{", "(").replace("}", ")")
+            body_parts.append(f"{{\\k{dur}}}{text} ")
+            prev_end = w.end
+        body = "".join(body_parts).strip()
+        events.append(
+            f"Dialogue: 0,{_fmt_ass(start)},{_fmt_ass(end)},Pop,,0,0,0,,{body}"
+        )
+
+    return header + "\n".join(events) + "\n"
+
+
+# --- Reframe chains -------------------------------------------------------
+
+def _static_reframe(opts: RenderOptions, lin: str, lout: str) -> str:
+    if opts.aspect == "original" or opts.aspect not in _TARGETS:
+        return f"[{lin}]null[{lout}]"
     w, h = _TARGETS[opts.aspect]
     if opts.fill == "crop":
         return (
-            f"[{label_in}]scale={w}:{h}:force_original_aspect_ratio=increase,"
-            f"crop={w}:{h},setsar=1[{label_out}]"
+            f"[{lin}]scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},setsar=1[{lout}]"
         )
-    # Blurred padded background (keeps the whole subject in frame).
     return (
-        f"[{label_in}]split=2[bg][fg];"
+        f"[{lin}]split=2[bg][fg];"
         f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
         f"boxblur=luma_radius=40:luma_power=2[bgb];"
         f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease[fgs];"
-        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1[{label_out}]"
+        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1[{lout}]"
     )
 
 
-def _caption_filter(srt_path: str, opts: RenderOptions) -> str:
-    style = (
-        f"FontSize={opts.font_size},PrimaryColour=&H00FFFFFF,"
-        "OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,"
-        "Alignment=2,MarginV=90,Bold=1"
-    )
-    return f"subtitles='{_escape_for_filter(srt_path)}':force_style='{style}'"
+def _video_chain(source: str, h: Highlight, opts: RenderOptions,
+                 lin: str, lout: str) -> Tuple[str, bool]:
+    """Return (filter_chain, tracked?) producing ``lout`` from ``lin``."""
+    if opts.fill == "track" and opts.aspect in _TARGETS:
+        tw, th = _TARGETS[opts.aspect]
+        track = compute_face_track(source, h.start, h.end)
+        if track is not None:
+            pts, sw, sh = track
+            return build_track_crop(pts, sw, sh, tw, th, lin, lout), True
+        # No face / no OpenCV → graceful fallback to blurred pad.
+        fallback = RenderOptions(**{**opts.__dict__, "fill": "blur"})
+        return _static_reframe(fallback, lin, lout), False
+    return _static_reframe(opts, lin, lout), False
 
+
+# --- Main entry -----------------------------------------------------------
 
 def render_clip(
     source_video: str,
@@ -107,7 +177,6 @@ def render_clip(
     out_path: str,
     opts: RenderOptions,
 ) -> str:
-    """Render a single highlight to ``out_path``; returns the path."""
     if not ffmpeg_available():
         raise RuntimeError(
             "ffmpeg introuvable. Installez-le (ex: `brew install ffmpeg` "
@@ -115,19 +184,34 @@ def render_clip(
         )
 
     duration = highlight.duration
-    tmp_srt = None
+    tmp_sub: Optional[str] = None
 
-    # Build the video filter chain.
-    chain = _reframe_chain(opts, "0:v", "v0")
-    last_label = "v0"
+    chain, _tracked = _video_chain(source_video, highlight, opts, "0:v", "v0")
+    last = "v0"
 
     words = _collect_words(highlight) if opts.captions else []
     if opts.captions and words:
-        fd, tmp_srt = tempfile.mkstemp(suffix=".srt")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(build_srt(words, highlight.start, opts.caption_words_per_line))
-        chain += f";[{last_label}]{_caption_filter(tmp_srt, opts)}[vout]"
-        last_label = "vout"
+        tw, th = _TARGETS.get(opts.aspect, (1080, 1920))
+        if opts.caption_style == "karaoke":
+            fd, tmp_sub = tempfile.mkstemp(suffix=".ass")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(build_ass(words, highlight.start,
+                                  opts.caption_words_per_line, tw, th,
+                                  opts.font_size))
+            cap = f"ass='{_escape_for_filter(tmp_sub)}'"
+        else:
+            fd, tmp_sub = tempfile.mkstemp(suffix=".srt")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(build_srt(words, highlight.start,
+                                  opts.caption_words_per_line))
+            style = (
+                f"FontSize={opts.font_size},PrimaryColour=&H00FFFFFF,"
+                "OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,"
+                "Alignment=2,MarginV=90,Bold=1"
+            )
+            cap = f"subtitles='{_escape_for_filter(tmp_sub)}':force_style='{style}'"
+        chain += f";[{last}]{cap}[vout]"
+        last = "vout"
 
     cmd = [
         "ffmpeg", "-y",
@@ -135,7 +219,7 @@ def render_clip(
         "-i", source_video,
         "-t", f"{duration:.3f}",
         "-filter_complex", chain,
-        "-map", f"[{last_label}]",
+        "-map", f"[{last}]",
         "-map", "0:a?",
         "-c:v", "libx264", "-preset", opts.preset, "-crf", str(opts.crf),
         "-pix_fmt", "yuv420p",
@@ -151,7 +235,7 @@ def render_clip(
             f"Échec ffmpeg sur {os.path.basename(out_path)}:\n{exc.stderr[-1500:]}"
         ) from exc
     finally:
-        if tmp_srt and os.path.exists(tmp_srt):
-            os.remove(tmp_srt)
+        if tmp_sub and os.path.exists(tmp_sub):
+            os.remove(tmp_sub)
 
     return out_path

@@ -7,6 +7,13 @@ python-multipart>=0.0.9
 # falls back to blind time-based chunking instead of smart highlights.
 faster-whisper>=1.0.0
 
+# Face-tracking auto-reframe (follow the speaker). Optional: without it the
+# app falls back to a blurred-pad / center-crop reframe.
+opencv-python-headless>=4.8.0
+
+# Import from a YouTube / social link. Optional: only needed for the link tab.
+yt-dlp>=2024.1.0
+
 # NOTE: ffmpeg must be installed separately on your system:
 #   macOS:   brew install ffmpeg
 #   Ubuntu:  sudo apt install ffmpeg

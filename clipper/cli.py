@@ -10,14 +10,16 @@ Produces up to N highlight clips (max 60s each) in the output folder.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import tempfile
 
-from clip_engine import ClipJobConfig, RenderOptions, run
+from clip_engine import ClipJobConfig, RenderOptions, download_video, is_url, run
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Découpe une longue vidéo en clips courts.")
-    p.add_argument("video", help="Chemin de la vidéo source")
+    p.add_argument("video", help="Chemin de la vidéo OU lien (YouTube…)")
     p.add_argument("-o", "--out", default="./clips", help="Dossier de sortie")
     p.add_argument("-n", "--num", type=int, default=6, help="Nombre de clips")
     p.add_argument("--max", type=float, default=60.0, help="Durée max d'un clip (s)")
@@ -26,8 +28,10 @@ def main() -> int:
                    help="Modèle Whisper: tiny/base/small/medium")
     p.add_argument("--lang", default=None, help="Langue (fr, en…) sinon auto")
     p.add_argument("--aspect", default="9:16", choices=["9:16", "1:1", "original"])
-    p.add_argument("--fill", default="blur", choices=["blur", "crop"])
-    p.add_argument("--no-captions", action="store_true", help="Sans sous-titres")
+    p.add_argument("--fill", default="track", choices=["track", "blur", "crop"],
+                   help="track = suit le visage (défaut)")
+    p.add_argument("--captions", default="karaoke",
+                   choices=["karaoke", "plain", "none"])
     args = p.parse_args()
 
     config = ClipJobConfig(
@@ -39,16 +43,22 @@ def main() -> int:
         render=RenderOptions(
             aspect=args.aspect,
             fill=args.fill,
-            captions=not args.no_captions,
+            captions=args.captions != "none",
+            caption_style="plain" if args.captions == "plain" else "karaoke",
         ),
     )
+
+    source = args.video
+    if is_url(source):
+        print("Téléchargement du lien…")
+        source = download_video(source, tempfile.mkdtemp(prefix="clipper_"))
 
     def progress(msg: str, pct: float) -> None:
         bar = "█" * int(pct * 30)
         print(f"\r[{bar:<30}] {pct*100:5.1f}%  {msg[:50]:<50}", end="", flush=True)
 
     try:
-        results = run(args.video, args.out, config, progress)
+        results = run(source, args.out, config, progress)
     except Exception as exc:  # noqa: BLE001
         print(f"\nErreur: {exc}", file=sys.stderr)
         return 1
@@ -57,10 +67,13 @@ def main() -> int:
     if not results:
         print("Aucun clip généré.")
         return 0
-    print(f"\n{len(results)} clips dans {args.out} :")
+    print(f"\n{len(results)} clips dans {os.path.abspath(args.out)} :")
     for r in results:
-        print(f"  {r.index:02d}. {r.title}  "
-              f"({r.duration:.0f}s, score {r.score:.2f}) → {r.filename}")
+        tags = " ".join(r.hashtags)
+        print(f"  [{r.virality:3d}/100 {r.label}] {r.title}  "
+              f"({r.duration:.0f}s) → {r.filename}")
+        if tags:
+            print(f"        {tags}")
     return 0
 
 

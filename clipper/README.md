@@ -1,23 +1,35 @@
 # 🎬 Home Clipper
 
-Un mini-OpusClip **100 % local**, pour un usage privé à la maison. Tu lui donnes
-une longue vidéo, il en sort automatiquement plusieurs **shorts de 1 minute
-maximum**, découpés sur les **meilleurs passages**, recadrés en vertical 9:16
-et sous-titrés.
+Un clone d'**OpusClip 100 % local**, pour un usage privé à la maison. Tu lui
+donnes une longue vidéo (ou un **lien YouTube**), il en sort automatiquement
+plusieurs **shorts de 1 minute maximum**, découpés sur les **meilleurs
+passages**, recadrés en vertical avec **suivi du visage**, **sous-titres
+animés (karaoké)** et un **score de viralité** par clip.
 
 Rien ne quitte ta machine : pas de cloud, pas de compte, pas d'abonnement.
 
 ---
 
+## Fonctions (comme OpusClip)
+
+- 🔗 **Import fichier ou lien YouTube** (via `yt-dlp`, usage privé).
+- ✂️ **Sélection auto des meilleurs moments** (≤ 60 s), classés par viralité.
+- 📊 **Score de viralité 0-100** par clip + badge *Viral / Bon / Moyen*.
+- 🎯 **Recadrage 9:16 qui suit le visage** du locuteur (OpenCV) — repli sur
+  fond flou / crop centré si aucun visage.
+- 💬 **Sous-titres animés karaoké** (mot par mot qui s'allume), style TikTok.
+- 🏷️ **Titre + hashtags** générés automatiquement pour chaque clip.
+
 ## Comment ça marche
 
-1. **Transcription** de la vidéo avec Whisper en local (horodatage mot à mot).
-2. **Sélection des meilleurs moments** : le texte est regroupé en fenêtres de
-   ≤ 60 s, puis noté selon des critères transparents — accroches (« secret »,
-   « erreur », « comment »…), questions, chiffres, énergie de parole, longueur
-   idéale. Les meilleures fenêtres, sans chevauchement, sont retenues.
-3. **Montage ffmpeg** : découpe, recadrage vertical (fond flou ou crop centré)
-   et sous-titres incrustés facon Shorts/TikTok.
+1. **Transcription** locale avec Whisper (horodatage mot à mot).
+2. **Sélection des meilleurs moments** : fenêtres ≤ 60 s pouvant démarrer sur
+   une accroche, notées selon des critères transparents — accroches
+   (« secret », « erreur », « comment »…), questions, chiffres, énergie de
+   parole, longueur idéale — puis retenues sans chevauchement.
+3. **Score de viralité** absolu (0-100) calculé sur ces mêmes signaux.
+4. **Montage ffmpeg** : découpe, recadrage vertical (suivi du visage / fond
+   flou / crop) et sous-titres incrustés facon Shorts/TikTok.
 
 Tout est expliqué et réglable dans `clip_engine/config.py`.
 
@@ -62,21 +74,24 @@ sur *Générer les clips*. Tu peux prévisualiser et télécharger chaque short.
 ### Ligne de commande
 
 ```bash
-python cli.py ma_video.mp4 -n 8 --aspect 9:16 --model small --out ./clips
+python cli.py ma_video.mp4 -n 8 --aspect 9:16 --fill track --model small
+python cli.py "https://youtube.com/watch?v=..." -n 10   # depuis un lien
 ```
 
 Options utiles :
 
-| Option        | Défaut  | Description                                  |
-|---------------|---------|----------------------------------------------|
-| `-n/--num`    | 6       | Nombre de clips à produire                    |
-| `--max`       | 60      | Durée max d'un clip (secondes, plafonné à 60) |
-| `--min`       | 15      | Durée min d'un clip                           |
-| `--model`     | base    | `tiny`/`base`/`small`/`medium` (précision)    |
-| `--lang`      | auto    | `fr`, `en`… force la langue                    |
-| `--aspect`    | 9:16    | `9:16`, `1:1` ou `original`                    |
-| `--fill`      | blur    | `blur` (fond flou) ou `crop` (recadré)         |
-| `--no-captions` | —     | Désactive les sous-titres                     |
+| Option       | Défaut  | Description                                       |
+|--------------|---------|---------------------------------------------------|
+| `-n/--num`   | 6       | Nombre de clips à produire                         |
+| `--max`      | 60      | Durée max d'un clip (secondes, plafonné à 60)      |
+| `--min`      | 15      | Durée min d'un clip                                |
+| `--model`    | base    | `tiny`/`base`/`small`/`medium` (précision)         |
+| `--lang`     | auto    | `fr`, `en`… force la langue                         |
+| `--aspect`   | 9:16    | `9:16`, `1:1` ou `original`                         |
+| `--fill`     | track   | `track` (suit le visage) / `blur` / `crop`         |
+| `--captions` | karaoke | `karaoke` (animés) / `plain` (simples) / `none`    |
+
+La sortie affiche le score de viralité et les hashtags de chaque clip.
 
 ---
 
@@ -90,10 +105,12 @@ clipper/
 ├── requirements.txt
 ├── static/index.html    # Interface web
 └── clip_engine/
-    ├── config.py        # Réglages & listes de mots-accroches
+    ├── config.py        # Réglages, mots-accroches & seuils de viralité
     ├── transcribe.py    # Whisper (avec repli si absent)
-    ├── highlights.py    # Sélection des meilleurs moments
-    ├── render.py        # Montage ffmpeg (recadrage + sous-titres)
+    ├── highlights.py    # Meilleurs moments + score viralité + hashtags
+    ├── reframe.py       # Suivi du visage (OpenCV → crop dynamique ffmpeg)
+    ├── render.py        # Montage ffmpeg (recadrage + sous-titres karaoké)
+    ├── fetch.py         # Import depuis un lien (yt-dlp)
     └── pipeline.py      # Orchestration bout-en-bout
 ```
 

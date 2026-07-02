@@ -15,11 +15,13 @@ import uuid
 from dataclasses import asdict
 from typing import Dict
 
+from typing import Optional
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from clip_engine import ClipJobConfig, RenderOptions, run
+from clip_engine import ClipJobConfig, RenderOptions, download_video, is_url, run
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -41,13 +43,22 @@ def _set(job_id: str, **fields) -> None:
         _jobs.setdefault(job_id, {}).update(fields)
 
 
-def _process(job_id: str, video_path: str, config: ClipJobConfig) -> None:
+def _process(
+    job_id: str,
+    config: ClipJobConfig,
+    video_path: Optional[str] = None,
+    url: Optional[str] = None,
+) -> None:
     out_dir = os.path.join(OUTPUT_DIR, job_id)
 
     def progress(msg: str, pct: float) -> None:
         _set(job_id, status="running", message=msg, progress=round(pct, 3))
 
     try:
+        if url:
+            progress("Téléchargement de la vidéo…", 0.03)
+            video_path = download_video(url, UPLOAD_DIR, prefix=job_id,
+                                        progress=progress)
         results = run(video_path, out_dir, config, progress)
         _set(
             job_id,
@@ -62,7 +73,7 @@ def _process(job_id: str, video_path: str, config: ClipJobConfig) -> None:
         # Keep the source only if something failed (helps debugging).
         with _lock:
             failed = _jobs.get(job_id, {}).get("status") == "error"
-        if not failed and os.path.exists(video_path):
+        if not failed and video_path and os.path.exists(video_path):
             try:
                 os.remove(video_path)
             except OSError:
@@ -77,21 +88,32 @@ def index() -> HTMLResponse:
 
 @app.post("/api/jobs")
 async def create_job(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    url: str = Form(""),
     num_clips: int = Form(6),
     max_seconds: float = Form(60.0),
     min_seconds: float = Form(15.0),
     model_size: str = Form("base"),
     language: str = Form(""),
     aspect: str = Form("9:16"),
-    fill: str = Form("blur"),
+    fill: str = Form("track"),
     captions: bool = Form(True),
+    caption_style: str = Form("karaoke"),
 ) -> dict:
     job_id = uuid.uuid4().hex[:12]
-    safe_name = os.path.basename(file.filename or "video.mp4")
-    video_path = os.path.join(UPLOAD_DIR, f"{job_id}_{safe_name}")
-    with open(video_path, "wb") as out:
-        shutil.copyfileobj(file.file, out)
+    url = url.strip()
+
+    video_path: Optional[str] = None
+    display_name = ""
+    if file is not None and file.filename:
+        display_name = os.path.basename(file.filename)
+        video_path = os.path.join(UPLOAD_DIR, f"{job_id}_{display_name}")
+        with open(video_path, "wb") as out:
+            shutil.copyfileobj(file.file, out)
+    elif is_url(url):
+        display_name = url
+    else:
+        raise HTTPException(400, "Fournissez un fichier vidéo ou un lien.")
 
     config = ClipJobConfig(
         num_clips=max(1, min(num_clips, 30)),
@@ -99,13 +121,19 @@ async def create_job(
         min_seconds=max(3.0, min_seconds),
         model_size=model_size,
         language=language or None,
-        render=RenderOptions(aspect=aspect, fill=fill, captions=captions),
+        render=RenderOptions(
+            aspect=aspect, fill=fill, captions=captions,
+            caption_style=caption_style,
+        ),
     )
 
     _set(job_id, status="queued", progress=0.0, message="En file d'attente",
-         filename=safe_name, clips=[])
+         filename=display_name, clips=[])
     threading.Thread(
-        target=_process, args=(job_id, video_path, config), daemon=True
+        target=_process, kwargs=dict(job_id=job_id, config=config,
+                                     video_path=video_path,
+                                     url=url if not video_path else None),
+        daemon=True,
     ).start()
     return {"job_id": job_id}
 

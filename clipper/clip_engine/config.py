@@ -42,15 +42,29 @@ EMPHASIS_WORDS: List[str] = [
 ]
 
 
+# Virality label thresholds (0-100), OpusClip-style.
+VIRAL_THRESHOLD = 80
+GOOD_THRESHOLD = 60
+
+
+def virality_label(score: int) -> str:
+    if score >= VIRAL_THRESHOLD:
+        return "🔥 Viral"
+    if score >= GOOD_THRESHOLD:
+        return "👍 Bon"
+    return "Moyen"
+
+
 @dataclass
 class RenderOptions:
     """How each exported clip should look."""
 
     aspect: str = "9:16"          # "9:16", "1:1", or "original"
-    fill: str = "blur"            # "blur" (padded blurred bg) or "crop" (center crop)
+    fill: str = "track"           # "track" (face follow), "blur", or "crop"
     captions: bool = True         # burn TikTok/OpusClip-style subtitles
+    caption_style: str = "karaoke"  # "karaoke" (word-by-word) or "plain"
     caption_words_per_line: int = 4
-    font_size: int = 18           # relative to a 1080-wide canvas
+    font_size: int = 20           # relative to a 1080-wide canvas
     crf: int = 20                 # x264 quality (lower = better/bigger)
     preset: str = "veryfast"
 

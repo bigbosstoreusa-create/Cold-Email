@@ -7,7 +7,7 @@ import os
 from dataclasses import asdict, dataclass
 from typing import Callable, List, Optional
 
-from .config import ClipJobConfig
+from .config import ClipJobConfig, virality_label
 from .highlights import Highlight, rank_highlights
 from .render import render_clip
 from .transcribe import transcribe
@@ -24,6 +24,9 @@ class ClipResult:
     end: float
     duration: float
     score: float
+    virality: int
+    label: str
+    hashtags: List[str]
     transcript: str
 
 
@@ -78,6 +81,7 @@ def run(
         out_path = os.path.join(out_dir, filename)
         report(f"Export {i}/{n} : {title}", 0.68 + 0.3 * (i - 1) / n)
         render_clip(video_path, h, out_path, config.render)
+        viral = h.virality()
         results.append(
             ClipResult(
                 index=i,
@@ -87,9 +91,15 @@ def run(
                 end=round(h.end, 2),
                 duration=round(h.duration, 2),
                 score=round(h.score, 3),
+                virality=viral,
+                label=virality_label(viral),
+                hashtags=h.hashtags(),
                 transcript=h.text,
             )
         )
+
+    # Show best clips first, like OpusClip's ranked feed.
+    results.sort(key=lambda r: r.virality, reverse=True)
 
     manifest = os.path.join(out_dir, "clips.json")
     with open(manifest, "w", encoding="utf-8") as f:
