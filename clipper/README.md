@@ -18,6 +18,8 @@ Rien ne quitte ta machine : pas de cloud, pas de compte, pas d'abonnement.
 - 🎯 **Recadrage 9:16 qui suit le visage** du locuteur (OpenCV) — repli sur
   fond flou / crop centré si aucun visage.
 - 💬 **Sous-titres animés karaoké** (mot par mot qui s'allume), style TikTok.
+- 😀 **Emojis automatiques** insérés dans les sous-titres selon les mots-clés
+  (« argent » 💰, « feu » 🔥, « secret » 🤫…), synchronisés au mot dit.
 - 🏷️ **Titre + hashtags** générés automatiquement pour chaque clip.
 
 ## Comment ça marche
@@ -90,6 +92,7 @@ Options utiles :
 | `--aspect`   | 9:16    | `9:16`, `1:1` ou `original`                         |
 | `--fill`     | track   | `track` (suit le visage) / `blur` / `crop`         |
 | `--captions` | karaoke | `karaoke` (animés) / `plain` (simples) / `none`    |
+| `--no-emojis`| —       | Désactive les emojis dans les sous-titres          |
 
 La sortie affiche le score de viralité et les hashtags de chaque clip.
 

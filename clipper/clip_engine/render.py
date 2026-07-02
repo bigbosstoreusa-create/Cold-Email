@@ -74,6 +74,21 @@ def _fmt_ass(seconds: float) -> str:
     return f"{h:d}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+def _emoji_for(word: str) -> str:
+    """Return an emoji for a spoken word (stem match), or '' if none."""
+    from .config import EMOJI_MAP
+
+    stem = "".join(c for c in word.lower() if c.isalpha())
+    if len(stem) < 3:
+        return ""
+    # Match only when the spoken word *starts with* a keyword (handles plurals
+    # like "secrets"), never the reverse — so "pour" won't hit "pourquoi".
+    for key, emo in EMOJI_MAP.items():
+        if stem.startswith(key):
+            return emo
+    return ""
+
+
 def build_ass(
     words: List[Word],
     clip_start: float,
@@ -81,6 +96,7 @@ def build_ass(
     target_w: int,
     target_h: int,
     font_size: int,
+    emojis: bool = True,
 ) -> str:
     """ASS subtitles with a karaoke sweep: each word lights up as it's said."""
     fontsize = max(24, round(target_h * font_size / 400))
@@ -124,7 +140,10 @@ def build_ass(
                 body_parts.append(f"{{\\k{int(round(gap * 100))}}}")
             dur = max(1, int(round((w.end - w.start) * 100)))
             text = w.text.strip().replace("{", "(").replace("}", ")")
-            body_parts.append(f"{{\\k{dur}}}{text} ")
+            emo = _emoji_for(w.text) if emojis else ""
+            # The emoji shares the word's \k so it pops in as the word is said.
+            token = f"{text} {emo}" if emo else text
+            body_parts.append(f"{{\\k{dur}}}{token} ")
             prev_end = w.end
         body = "".join(body_parts).strip()
         events.append(
@@ -197,7 +216,7 @@ def render_clip(
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(build_ass(words, highlight.start,
                                   opts.caption_words_per_line, tw, th,
-                                  opts.font_size))
+                                  opts.font_size, opts.emojis))
             cap = f"ass='{_escape_for_filter(tmp_sub)}'"
         else:
             fd, tmp_sub = tempfile.mkstemp(suffix=".srt")

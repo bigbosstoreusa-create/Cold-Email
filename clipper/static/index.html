@@ -120,6 +120,12 @@
           <option value="none">Aucun</option>
         </select>
       </label>
+      <label class="f">Emojis
+        <select id="emojis">
+          <option value="true" selected>Oui 🔥</option>
+          <option value="false">Non</option>
+        </select>
+      </label>
       <label class="f">Transcription
         <select id="model">
           <option value="tiny">Tiny (rapide)</option>
@@ -207,6 +213,7 @@ $("go").addEventListener("click",async()=>{
   const cs=$("captionStyle").value;
   fd.append("captions",cs!=="none");
   fd.append("caption_style",cs==="plain"?"plain":"karaoke");
+  fd.append("emojis",$("emojis").value);
   try{
     const res=await fetch("/api/jobs",{method:"POST",body:fd});
     if(!res.ok){throw new Error((await res.json()).detail||"Erreur");}

@@ -99,6 +99,7 @@ async def create_job(
     fill: str = Form("track"),
     captions: bool = Form(True),
     caption_style: str = Form("karaoke"),
+    emojis: bool = Form(True),
 ) -> dict:
     job_id = uuid.uuid4().hex[:12]
     url = url.strip()
@@ -123,7 +124,7 @@ async def create_job(
         language=language or None,
         render=RenderOptions(
             aspect=aspect, fill=fill, captions=captions,
-            caption_style=caption_style,
+            caption_style=caption_style, emojis=emojis,
         ),
     )
 

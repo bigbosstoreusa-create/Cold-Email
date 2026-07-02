@@ -32,6 +32,8 @@ def main() -> int:
                    help="track = suit le visage (défaut)")
     p.add_argument("--captions", default="karaoke",
                    choices=["karaoke", "plain", "none"])
+    p.add_argument("--no-emojis", action="store_true",
+                   help="Désactive les emojis dans les sous-titres")
     args = p.parse_args()
 
     config = ClipJobConfig(
@@ -45,6 +47,7 @@ def main() -> int:
             fill=args.fill,
             captions=args.captions != "none",
             caption_style="plain" if args.captions == "plain" else "karaoke",
+            emojis=not args.no_emojis,
         ),
     )
 

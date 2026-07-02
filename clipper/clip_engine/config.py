@@ -42,6 +42,27 @@ EMPHASIS_WORDS: List[str] = [
 ]
 
 
+# Keyword → emoji, injected into captions when the word is spoken (FR/EN).
+# Matching is on the word stem (startswith), so "argent"/"argents" both hit.
+EMOJI_MAP: dict[str, str] = {
+    "argent": "💰", "euro": "💰", "dollar": "💰", "money": "💰", "cash": "💰",
+    "riche": "🤑", "million": "💸", "gratuit": "🆓", "free": "🆓",
+    "feu": "🔥", "fire": "🔥", "chaud": "🔥", "incroyable": "🤯", "fou": "🤯",
+    "dingue": "🤯", "crazy": "🤯", "mind": "🤯", "wow": "😮", "choc": "😱",
+    "peur": "😱", "attention": "⚠️", "danger": "⚠️", "warning": "⚠️",
+    "erreur": "❌", "faux": "❌", "mistake": "❌", "wrong": "❌", "stop": "🛑",
+    "secret": "🤫", "astuce": "💡", "idée": "💡", "tip": "💡", "idea": "💡",
+    "solution": "✅", "parfait": "✅", "oui": "✅", "yes": "✅", "gagner": "🏆",
+    "meilleur": "🏆", "best": "🏆", "win": "🏆", "victoire": "🏆",
+    "temps": "⏰", "time": "⏰", "vite": "⚡", "rapide": "⚡", "fast": "⚡",
+    "amour": "❤️", "love": "❤️", "coeur": "❤️", "cœur": "❤️",
+    "musique": "🎵", "music": "🎵", "travail": "💼", "business": "💼",
+    "cerveau": "🧠", "intelligent": "🧠", "smart": "🧠", "question": "🤔",
+    "pourquoi": "🤔", "why": "🤔", "grand": "📈", "croissance": "📈",
+    "monde": "🌍", "world": "🌍", "email": "📧", "mail": "📧",
+}
+
+
 # Virality label thresholds (0-100), OpusClip-style.
 VIRAL_THRESHOLD = 80
 GOOD_THRESHOLD = 60
@@ -63,6 +84,7 @@ class RenderOptions:
     fill: str = "track"           # "track" (face follow), "blur", or "crop"
     captions: bool = True         # burn TikTok/OpusClip-style subtitles
     caption_style: str = "karaoke"  # "karaoke" (word-by-word) or "plain"
+    emojis: bool = True           # sprinkle keyword emojis into captions
     caption_words_per_line: int = 4
     font_size: int = 20           # relative to a 1080-wide canvas
     crf: int = 20                 # x264 quality (lower = better/bigger)
