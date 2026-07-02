@@ -85,6 +85,10 @@ class RenderOptions:
     captions: bool = True         # burn TikTok/OpusClip-style subtitles
     caption_style: str = "karaoke"  # "karaoke" (word-by-word) or "plain"
     emojis: bool = True           # sprinkle keyword emojis into captions
+    broll: bool = False           # overlay B-roll from a local folder
+    broll_dir: str = ""           # folder of keyword-named clips
+    broll_seconds: float = 2.5    # length of each B-roll insert
+    broll_max: int = 3            # max inserts per clip
     caption_words_per_line: int = 4
     font_size: int = 20           # relative to a 1080-wide canvas
     crf: int = 20                 # x264 quality (lower = better/bigger)

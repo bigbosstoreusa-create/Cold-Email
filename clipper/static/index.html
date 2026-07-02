@@ -126,6 +126,12 @@
           <option value="false">Non</option>
         </select>
       </label>
+      <label class="f">B-roll (dossier local)
+        <select id="broll">
+          <option value="false" selected>Non</option>
+          <option value="true">Oui 🎞️</option>
+        </select>
+      </label>
       <label class="f">Transcription
         <select id="model">
           <option value="tiny">Tiny (rapide)</option>
@@ -214,6 +220,7 @@ $("go").addEventListener("click",async()=>{
   fd.append("captions",cs!=="none");
   fd.append("caption_style",cs==="plain"?"plain":"karaoke");
   fd.append("emojis",$("emojis").value);
+  fd.append("broll",$("broll").value);
   try{
     const res=await fetch("/api/jobs",{method:"POST",body:fd});
     if(!res.ok){throw new Error((await res.json()).detail||"Erreur");}

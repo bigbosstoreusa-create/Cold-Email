@@ -27,8 +27,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
+BROLL_DIR = os.path.join(DATA_DIR, "broll")  # drop keyword-named clips here
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-for d in (UPLOAD_DIR, OUTPUT_DIR):
+for d in (UPLOAD_DIR, OUTPUT_DIR, BROLL_DIR):
     os.makedirs(d, exist_ok=True)
 
 app = FastAPI(title="Home Clipper")
@@ -100,6 +101,7 @@ async def create_job(
     captions: bool = Form(True),
     caption_style: str = Form("karaoke"),
     emojis: bool = Form(True),
+    broll: bool = Form(False),
 ) -> dict:
     job_id = uuid.uuid4().hex[:12]
     url = url.strip()
@@ -125,6 +127,7 @@ async def create_job(
         render=RenderOptions(
             aspect=aspect, fill=fill, captions=captions,
             caption_style=caption_style, emojis=emojis,
+            broll=broll, broll_dir=BROLL_DIR,
         ),
     )
 

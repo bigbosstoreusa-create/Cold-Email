@@ -20,6 +20,8 @@ Rien ne quitte ta machine : pas de cloud, pas de compte, pas d'abonnement.
 - 💬 **Sous-titres animés karaoké** (mot par mot qui s'allume), style TikTok.
 - 😀 **Emojis automatiques** insérés dans les sous-titres selon les mots-clés
   (« argent » 💰, « feu » 🔥, « secret » 🤫…), synchronisés au mot dit.
+- 🎞️ **B-roll auto depuis un dossier local** : tes propres plans d'illustration
+  s'incrustent quand le mot correspondant est dit.
 - 🏷️ **Titre + hashtags** générés automatiquement pour chaque clip.
 
 ## Comment ça marche
@@ -96,6 +98,21 @@ Options utiles :
 
 La sortie affiche le score de viralité et les hashtags de chaque clip.
 
+### B-roll depuis un dossier local
+
+Dépose tes propres vidéos d'illustration dans un dossier, **nommées par
+mot-clé** : `argent.mp4`, `ocean_1.mov`, `ville-nuit.webm`… Quand la
+transcription prononce ce mot (élisions gérées : « d'argent », « l'océan »),
+le plan correspondant est incrusté quelques secondes (l'audio d'origine
+continue). Plusieurs fichiers pour un même mot ? Ils sont utilisés à tour de
+rôle pour varier.
+
+- **Interface web** : coche *B-roll* → le dossier est `clipper/data/broll/`
+  (créé automatiquement). Mets-y tes clips avant de lancer.
+- **Ligne de commande** : `python cli.py video.mp4 --broll ./mon_broll`
+
+Réglages avancés (durée d'insert, nombre max) dans `clip_engine/config.py`.
+
 ---
 
 ## Structure
@@ -112,7 +129,8 @@ clipper/
     ├── transcribe.py    # Whisper (avec repli si absent)
     ├── highlights.py    # Meilleurs moments + score viralité + hashtags
     ├── reframe.py       # Suivi du visage (OpenCV → crop dynamique ffmpeg)
-    ├── render.py        # Montage ffmpeg (recadrage + sous-titres karaoké)
+    ├── render.py        # Montage ffmpeg (recadrage + sous-titres + B-roll)
+    ├── broll.py         # Index & planification du B-roll local
     ├── fetch.py         # Import depuis un lien (yt-dlp)
     └── pipeline.py      # Orchestration bout-en-bout
 ```

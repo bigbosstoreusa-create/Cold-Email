@@ -34,6 +34,8 @@ def main() -> int:
                    choices=["karaoke", "plain", "none"])
     p.add_argument("--no-emojis", action="store_true",
                    help="Désactive les emojis dans les sous-titres")
+    p.add_argument("--broll", default="", metavar="DOSSIER",
+                   help="Dossier de clips B-roll (nommés par mot-clé)")
     args = p.parse_args()
 
     config = ClipJobConfig(
@@ -48,6 +50,8 @@ def main() -> int:
             captions=args.captions != "none",
             caption_style="plain" if args.captions == "plain" else "karaoke",
             emojis=not args.no_emojis,
+            broll=bool(args.broll),
+            broll_dir=args.broll,
         ),
     )
 

@@ -74,11 +74,19 @@ def _fmt_ass(seconds: float) -> str:
     return f"{h:d}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+def _word_stem(word: str) -> str:
+    """Lowercase alpha stem, dropping French elisions (d'argent → argent)."""
+    w = word.lower().replace("’", "'")
+    if "'" in w:
+        w = w.split("'")[-1]
+    return "".join(c for c in w if c.isalpha())
+
+
 def _emoji_for(word: str) -> str:
     """Return an emoji for a spoken word (stem match), or '' if none."""
     from .config import EMOJI_MAP
 
-    stem = "".join(c for c in word.lower() if c.isalpha())
+    stem = _word_stem(word)
     if len(stem) < 3:
         return ""
     # Match only when the spoken word *starts with* a keyword (handles plurals
@@ -188,6 +196,29 @@ def _video_chain(source: str, h: Highlight, opts: RenderOptions,
     return _static_reframe(opts, lin, lout), False
 
 
+def _broll_chain(inserts, target_w, target_h, lin, lout):
+    """Build overlay chain + extra ffmpeg inputs for local B-roll inserts."""
+    parts: List[str] = []
+    extra_inputs: List[str] = []
+    cur = lin
+    for i, ins in enumerate(inserts):
+        idx = i + 1  # main video is input 0; B-roll inputs follow
+        extra_inputs += ["-stream_loop", "-1", "-i", ins.path]
+        blabel = f"b{i}"
+        nxt = lout if i == len(inserts) - 1 else f"{lout}{i}"
+        parts.append(
+            f"[{idx}:v]scale={target_w}:{target_h}:"
+            f"force_original_aspect_ratio=increase,crop={target_w}:{target_h},"
+            f"setsar=1,setpts=PTS-STARTPTS+{ins.start:.3f}/TB[{blabel}]"
+        )
+        parts.append(
+            f"[{cur}][{blabel}]overlay=0:0:"
+            f"enable='between(t,{ins.start:.3f},{ins.end:.3f})'[{nxt}]"
+        )
+        cur = nxt
+    return ";".join(parts), extra_inputs
+
+
 # --- Main entry -----------------------------------------------------------
 
 def render_clip(
@@ -207,6 +238,19 @@ def render_clip(
 
     chain, _tracked = _video_chain(source_video, highlight, opts, "0:v", "v0")
     last = "v0"
+
+    # B-roll overlays go under the captions but over the reframed video.
+    extra_inputs: List[str] = []
+    if opts.broll and opts.broll_dir and opts.aspect in _TARGETS:
+        from .broll import index_broll, plan_broll
+
+        idx = index_broll(opts.broll_dir)
+        plan = plan_broll(highlight, idx, opts.broll_seconds, opts.broll_max)
+        if plan:
+            tw, th = _TARGETS[opts.aspect]
+            bchain, extra_inputs = _broll_chain(plan, tw, th, last, "vb")
+            chain += ";" + bchain
+            last = "vb"
 
     words = _collect_words(highlight) if opts.captions else []
     if opts.captions and words:
@@ -232,20 +276,21 @@ def render_clip(
         chain += f";[{last}]{cap}[vout]"
         last = "vout"
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-ss", f"{highlight.start:.3f}",
-        "-i", source_video,
-        "-t", f"{duration:.3f}",
-        "-filter_complex", chain,
-        "-map", f"[{last}]",
-        "-map", "0:a?",
-        "-c:v", "libx264", "-preset", opts.preset, "-crf", str(opts.crf),
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "+faststart",
-        out_path,
-    ]
+    cmd = (
+        ["ffmpeg", "-y", "-ss", f"{highlight.start:.3f}", "-i", source_video]
+        + extra_inputs
+        + [
+            "-t", f"{duration:.3f}",
+            "-filter_complex", chain,
+            "-map", f"[{last}]",
+            "-map", "0:a?",
+            "-c:v", "libx264", "-preset", opts.preset, "-crf", str(opts.crf),
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            out_path,
+        ]
+    )
 
     try:
         subprocess.run(cmd, capture_output=True, text=True, check=True)
