@@ -1,0 +1,13 @@
+# Web app
+fastapi>=0.110
+uvicorn[standard]>=0.25
+python-multipart>=0.0.9
+
+# Transcription (local, offline). If you skip this the app still works but
+# falls back to blind time-based chunking instead of smart highlights.
+faster-whisper>=1.0.0
+
+# NOTE: ffmpeg must be installed separately on your system:
+#   macOS:   brew install ffmpeg
+#   Ubuntu:  sudo apt install ffmpeg
+#   Windows: https://www.gyan.dev/ffmpeg/builds/  (add to PATH)

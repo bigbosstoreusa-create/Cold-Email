@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Home Clipper — découpe tes vidéos en shorts</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --border:#2d333b; --text:#e6edf3;
+    --muted:#8b949e; --accent:#7c5cff; --accent2:#00d4aa; --danger:#f85149;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg); color:var(--text); line-height:1.5;
+  }
+  header { padding:28px 20px 8px; text-align:center; }
+  header h1 { margin:0; font-size:26px; }
+  header p { color:var(--muted); margin:6px 0 0; }
+  .wrap { max-width:960px; margin:0 auto; padding:20px; }
+  .card {
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:20px; margin-bottom:20px;
+  }
+  .drop {
+    border:2px dashed var(--border); border-radius:12px; padding:34px;
+    text-align:center; cursor:pointer; transition:.15s; color:var(--muted);
+  }
+  .drop.drag, .drop:hover { border-color:var(--accent); color:var(--text); }
+  .drop b { color:var(--accent); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+  label.field { display:flex; flex-direction:column; gap:6px; font-size:13px; color:var(--muted); }
+  select, input[type=number] {
+    background:var(--bg); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:8px 10px; font-size:14px;
+  }
+  .row { display:flex; align-items:center; gap:8px; }
+  button {
+    background:var(--accent); color:#fff; border:0; border-radius:10px;
+    padding:12px 22px; font-size:15px; font-weight:600; cursor:pointer; transition:.15s;
+  }
+  button:hover { filter:brightness(1.1); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .bar { height:10px; background:var(--bg); border-radius:6px; overflow:hidden; margin-top:10px; }
+  .bar > i { display:block; height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .3s; }
+  .clips { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px; }
+  .clip { background:var(--bg); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .clip video { width:100%; display:block; background:#000; aspect-ratio:9/16; object-fit:contain; }
+  .clip .meta { padding:10px 12px; }
+  .clip .title { font-weight:600; font-size:14px; margin:0 0 4px; }
+  .clip .sub { color:var(--muted); font-size:12px; }
+  .clip a.dl { display:inline-block; margin-top:8px; font-size:13px; color:var(--accent2); text-decoration:none; }
+  .hidden { display:none; }
+  .err { color:var(--danger); }
+  .muted { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 Home Clipper</h1>
+  <p>Transforme une longue vidéo en plusieurs shorts (≤ 1 min) — 100&nbsp;% local.</p>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div id="drop" class="drop">
+      <p>Glisse ta vidéo ici ou <b>clique pour choisir</b></p>
+      <p class="muted" id="fileName">MP4, MOV, MKV… traité sur ta machine.</p>
+      <input id="file" type="file" accept="video/*" class="hidden" />
+    </div>
+
+    <div class="grid" style="margin-top:18px;">
+      <label class="field">Nombre de clips
+        <input id="numClips" type="number" min="1" max="30" value="6" />
+      </label>
+      <label class="field">Durée max (s)
+        <input id="maxSeconds" type="number" min="10" max="60" value="60" />
+      </label>
+      <label class="field">Durée min (s)
+        <input id="minSeconds" type="number" min="3" max="60" value="15" />
+      </label>
+      <label class="field">Format
+        <select id="aspect">
+          <option value="9:16">Vertical 9:16 (TikTok/Shorts)</option>
+          <option value="1:1">Carré 1:1</option>
+          <option value="original">Format d'origine</option>
+        </select>
+      </label>
+      <label class="field">Recadrage
+        <select id="fill">
+          <option value="blur">Fond flou (garde tout)</option>
+          <option value="crop">Recadrage centré</option>
+        </select>
+      </label>
+      <label class="field">Qualité transcription
+        <select id="model">
+          <option value="tiny">Tiny (rapide)</option>
+          <option value="base" selected>Base</option>
+          <option value="small">Small (précis)</option>
+          <option value="medium">Medium (lent)</option>
+        </select>
+      </label>
+      <label class="field">Langue
+        <select id="language">
+          <option value="">Auto</option>
+          <option value="fr">Français</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <label class="field">Sous-titres
+        <select id="captions">
+          <option value="true" selected>Oui (incrustés)</option>
+          <option value="false">Non</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:18px;">
+      <button id="go" disabled>Générer les clips</button>
+      <span id="hint" class="muted">Choisis d'abord une vidéo.</span>
+    </div>
+  </div>
+
+  <div id="progressCard" class="card hidden">
+    <div class="row"><strong id="statusMsg">Préparation…</strong></div>
+    <div class="bar"><i id="barFill"></i></div>
+  </div>
+
+  <div id="resultCard" class="card hidden">
+    <h3 style="margin-top:0;">Tes clips</h3>
+    <div id="clips" class="clips"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let selectedFile = null;
+let currentJob = null;
+let poller = null;
+
+const drop = $("drop"), fileInput = $("file");
+drop.addEventListener("click", () => fileInput.click());
+["dragover","dragenter"].forEach(e => drop.addEventListener(e, ev => {
+  ev.preventDefault(); drop.classList.add("drag");
+}));
+["dragleave","drop"].forEach(e => drop.addEventListener(e, ev => {
+  ev.preventDefault(); drop.classList.remove("drag");
+}));
+drop.addEventListener("drop", ev => {
+  if (ev.dataTransfer.files.length) setFile(ev.dataTransfer.files[0]);
+});
+fileInput.addEventListener("change", () => {
+  if (fileInput.files.length) setFile(fileInput.files[0]);
+});
+
+function setFile(f) {
+  selectedFile = f;
+  $("fileName").textContent = f.name + "  (" + (f.size/1e6).toFixed(1) + " Mo)";
+  $("go").disabled = false;
+  $("hint").textContent = "Prêt à découper.";
+}
+
+$("go").addEventListener("click", async () => {
+  if (!selectedFile) return;
+  $("go").disabled = true;
+  $("hint").textContent = "Envoi…";
+  $("resultCard").classList.add("hidden");
+  $("clips").innerHTML = "";
+
+  const fd = new FormData();
+  fd.append("file", selectedFile);
+  fd.append("num_clips", $("numClips").value);
+  fd.append("max_seconds", $("maxSeconds").value);
+  fd.append("min_seconds", $("minSeconds").value);
+  fd.append("model_size", $("model").value);
+  fd.append("language", $("language").value);
+  fd.append("aspect", $("aspect").value);
+  fd.append("fill", $("fill").value);
+  fd.append("captions", $("captions").value);
+
+  try {
+    const res = await fetch("/api/jobs", { method:"POST", body:fd });
+    const data = await res.json();
+    currentJob = data.job_id;
+    $("progressCard").classList.remove("hidden");
+    $("hint").textContent = "";
+    poll();
+  } catch (e) {
+    $("hint").innerHTML = '<span class="err">Erreur d\'envoi.</span>';
+    $("go").disabled = false;
+  }
+});
+
+function poll() {
+  clearInterval(poller);
+  poller = setInterval(async () => {
+    const res = await fetch("/api/jobs/" + currentJob);
+    if (!res.ok) return;
+    const job = await res.json();
+    $("statusMsg").textContent = job.message || job.status;
+    $("barFill").style.width = ((job.progress||0)*100) + "%";
+    if (job.status === "done") {
+      clearInterval(poller);
+      showClips(job.clips || []);
+      $("go").disabled = false;
+    } else if (job.status === "error") {
+      clearInterval(poller);
+      $("statusMsg").innerHTML = '<span class="err">'+ (job.message||"Erreur") +'</span>';
+      $("go").disabled = false;
+    }
+  }, 1200);
+}
+
+function showClips(clips) {
+  const box = $("clips");
+  box.innerHTML = "";
+  if (!clips.length) {
+    box.innerHTML = '<p class="muted">Aucun extrait trouvé.</p>';
+  }
+  for (const c of clips) {
+    const url = "/api/clips/" + currentJob + "/" + encodeURIComponent(c.filename);
+    const el = document.createElement("div");
+    el.className = "clip";
+    el.innerHTML = `
+      <video src="${url}" controls preload="metadata"></video>
+      <div class="meta">
+        <p class="title">${escapeHtml(c.title)}</p>
+        <p class="sub">${c.duration.toFixed(0)}s · score ${c.score.toFixed(2)}</p>
+        <a class="dl" href="${url}" download>⬇ Télécharger</a>
+      </div>`;
+    box.appendChild(el);
+  }
+  $("resultCard").classList.remove("hidden");
+}
+
+function escapeHtml(s){ const d=document.createElement("div"); d.textContent=s||""; return d.innerHTML; }
+</script>
+</body>
+</html>
