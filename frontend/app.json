@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "Spectra — Détecteur d'Énergies",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -25,6 +25,12 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Spectra utilise la caméra pour superposer la visualisation des capteurs à l'image de votre environnement."
+        }
+      ],
       [
         "expo-splash-screen",
         {
