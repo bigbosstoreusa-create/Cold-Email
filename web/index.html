@@ -1,0 +1,515 @@
+<title>Spectra — Détecteur d'énergies</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+
+<style>
+  /* ─── Spectra : HUD caméra sombre (thème unique délibéré) ─────────────── */
+  :root {
+    --ground: #05070f;
+    --panel: rgba(6, 10, 22, 0.82);
+    --line: rgba(148, 163, 184, 0.22);
+    --ink: #e6e9f2;
+    --muted: #8b93a8;
+    --accent: #a78bfa;
+    --state: #22d3ee; /* réécrit par JS selon l'état */
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  html, body { height: 100%; background: var(--ground); }
+  body { margin: 0; font-family: var(--sans); color: var(--ink); overflow: hidden; }
+
+  #app { position: fixed; inset: 0; background: var(--ground); }
+  #cam {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; background: var(--ground);
+  }
+  #fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  /* ─── HUD ──────────────────────────────────────────────────────────────── */
+  #hud {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 14px
+             calc(env(safe-area-inset-bottom, 0px) + 14px);
+    gap: 10px; pointer-events: none;
+  }
+  #hud > * { pointer-events: auto; }
+
+  .wordmark { text-align: center; pointer-events: none; }
+  .wordmark h1 {
+    margin: 0; font-size: 17px; font-weight: 800; letter-spacing: 0.42em;
+    text-indent: 0.42em; text-shadow: 0 1px 8px rgba(0,0,0,0.8);
+  }
+  .wordmark p {
+    margin: 2px 0 0; font-size: 11px; color: var(--muted);
+    letter-spacing: 0.08em; text-shadow: 0 1px 6px rgba(0,0,0,0.8);
+  }
+
+  #journal { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  #journal li {
+    display: flex; align-items: center; gap: 7px; align-self: flex-start;
+    max-width: 95%; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 5px 10px; font-size: 11.5px;
+  }
+  #journal .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  #journal time { color: var(--muted); font-family: var(--mono); font-size: 10px; }
+  #journal li:nth-child(2) { opacity: 0.78; }
+  #journal li:nth-child(3) { opacity: 0.56; }
+  #journal li:nth-child(4) { opacity: 0.34; }
+
+  .spacer { flex: 1; pointer-events: none; }
+
+  #notice {
+    align-self: center; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 6px 12px; font-size: 11.5px; color: var(--muted);
+    display: none; text-align: center;
+  }
+
+  /* ─── Panneau d'instruments ───────────────────────────────────────────── */
+  #panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 20px;
+    padding: 14px; display: flex; flex-direction: column; gap: 12px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .row { display: flex; align-items: center; gap: 16px; }
+
+  .gauge { position: relative; width: 92px; height: 92px; flex: none; }
+  .gauge svg { transform: rotate(-90deg); }
+  .gauge .track { stroke: rgba(148, 163, 184, 0.18); }
+  .gauge .arc { stroke: var(--state); transition: stroke-dashoffset 0.2s linear, stroke 0.4s; }
+  .gauge .center {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .gauge .value {
+    font-family: var(--mono); font-size: 28px; font-weight: 700;
+    font-variant-numeric: tabular-nums; color: var(--state); transition: color 0.4s;
+  }
+  .gauge .unit { font-size: 9px; color: var(--muted); margin-top: -2px; }
+
+  .readouts { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  #status {
+    font-size: 14px; font-weight: 800; letter-spacing: 0.18em;
+    color: var(--state); transition: color 0.4s;
+  }
+  .readout { display: flex; flex-direction: column; gap: 4px; }
+  .readout .head { display: flex; align-items: baseline; gap: 6px; }
+  .readout .label { flex: 1; font-size: 10.5px; color: var(--muted); letter-spacing: 0.04em; }
+  .readout .val {
+    font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .bar { height: 4px; border-radius: 2px; background: rgba(148, 163, 184, 0.18); overflow: hidden; }
+  .bar i {
+    display: block; height: 100%; width: 2%;
+    background: var(--state); border-radius: 2px;
+    transition: width 0.2s linear, background 0.4s;
+  }
+
+  button {
+    font: inherit; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #recal {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 11px; border-radius: 12px; background: rgba(51, 65, 85, 0.6);
+    color: var(--ink); font-size: 13px; font-weight: 600;
+  }
+  #recal:disabled { opacity: 0.5; cursor: default; }
+
+  /* ─── Écran d'accueil ─────────────────────────────────────────────────── */
+  #gate {
+    position: absolute; inset: 0; z-index: 10; display: flex;
+    align-items: center; justify-content: center; padding: 22px;
+    background:
+      radial-gradient(120% 90% at 50% 0%, rgba(124, 58, 237, 0.16), transparent 60%),
+      var(--ground);
+    overflow-y: auto;
+  }
+  .gate-card {
+    max-width: 400px; display: flex; flex-direction: column; gap: 14px;
+    text-align: center; align-items: center;
+    padding: 26px 22px; border: 1px solid rgba(167, 139, 250, 0.35);
+    border-radius: 24px; background: rgba(10, 14, 28, 0.7);
+  }
+  .sigil {
+    width: 54px; height: 54px; border-radius: 50%;
+    border: 1.5px solid var(--accent); display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 24px rgba(124, 58, 237, 0.45), inset 0 0 14px rgba(124, 58, 237, 0.3);
+  }
+  .sigil::after { content: ""; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  .gate-card h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 0.4em; text-indent: 0.4em; }
+  .gate-card .sub {
+    margin: -6px 0 0; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  .gate-card p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--muted); text-wrap: pretty; }
+  .gate-card p strong { color: var(--ink); font-weight: 600; }
+  #start {
+    margin-top: 4px; padding: 14px 26px; border-radius: 14px;
+    background: #7c3aed; color: #fff; font-size: 15px; font-weight: 700;
+    box-shadow: 0 4px 24px rgba(124, 58, 237, 0.4);
+  }
+  .fineprint { font-size: 11px !important; opacity: 0.85; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gauge .arc, .bar i { transition: none; }
+  }
+</style>
+
+<div id="app">
+  <video id="cam" playsinline muted autoplay></video>
+  <canvas id="fx"></canvas>
+
+  <div id="hud" hidden>
+    <div class="wordmark">
+      <h1>SPECTRA</h1>
+      <p>Analyse de l’environnement en cours…</p>
+    </div>
+
+    <ul id="journal"></ul>
+    <div class="spacer"></div>
+    <div id="notice"></div>
+
+    <div id="panel">
+      <div class="row">
+        <div class="gauge">
+          <svg width="92" height="92" viewBox="0 0 92 92" aria-hidden="true">
+            <circle class="track" cx="46" cy="46" r="40" fill="none" stroke-width="6"></circle>
+            <circle class="arc" id="arc" cx="46" cy="46" r="40" fill="none" stroke-width="6"
+                    stroke-linecap="round" stroke-dasharray="251.33" stroke-dashoffset="251.33"></circle>
+          </svg>
+          <div class="center">
+            <span class="value" id="score">--</span>
+            <span class="unit">/ 100</span>
+          </div>
+        </div>
+
+        <div class="readouts">
+          <span id="status">CALIBRATION…</span>
+          <div class="readout">
+            <div class="head">
+              <span class="label">Perturbation magnétique (boussole)</span>
+              <span class="val" id="magVal">—</span>
+            </div>
+            <div class="bar"><i id="magBar"></i></div>
+          </div>
+          <div class="readout">
+            <div class="head">
+              <span class="label">Vibrations</span>
+              <span class="val" id="vibVal">—</span>
+            </div>
+            <div class="bar"><i id="vibBar"></i></div>
+          </div>
+        </div>
+      </div>
+      <button id="recal" type="button">Recalibrer l’environnement</button>
+    </div>
+  </div>
+
+  <div id="gate">
+    <div class="gate-card">
+      <div class="sigil" aria-hidden="true"></div>
+      <h1>SPECTRA</h1>
+      <p class="sub">Détecteur d’énergies ambiantes</p>
+      <p>
+        Spectra lit les <strong>capteurs réels</strong> de votre téléphone —
+        boussole et détecteur de mouvement — et superpose leurs fluctuations à
+        l’image de votre caméra sous forme d’« énergies ».
+      </p>
+      <p class="fineprint">
+        Les perturbations affichées ont des causes physiques ordinaires
+        (appareils électriques, métal, mouvements). Aucune preuve scientifique
+        ne relie ces mesures à des entités : l’interprétation « spirituelle »
+        relève de l’exploration et du divertissement.
+      </p>
+      <button id="start" type="button">Activer caméra et capteurs</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ─── Constantes de détection ─────────────────────────────────────────── */
+  const CALIBRATION_MS = 3000;
+  const TICK_MS = 100;
+  const MAG_FULL_SCALE = 6;     // ° d'instabilité boussole = composante saturée
+  const VIB_FULL_SCALE = 0.35;  // g RMS = composante saturée
+  const MAG_EVENT = 3.5;        // seuil de journalisation (°)
+  const VIB_EVENT = 0.22;       // seuil de journalisation (g)
+  const COOLDOWN_MS = 4000;
+  const STATES = {
+    calibrating: { label: "CALIBRATION…", color: "#22d3ee" },
+    calm:        { label: "CALME",        color: "#34d399" },
+    active:      { label: "ACTIVITÉ",     color: "#fbbf24" },
+    anomaly:     { label: "ANOMALIE",     color: "#f43f5e" },
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const fmt = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const fmt2 = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ─── État capteurs ───────────────────────────────────────────────────── */
+  const headings = [];      // fenêtre d'échantillons boussole (°)
+  const accWindow = [];     // fenêtre |accélération| (g)
+  let lastHeadingPush = 0;
+  let rotationRate = 0;     // °/s — pour ignorer la boussole quand on tourne
+  let hasCompass = false;
+  let calibrating = true;
+  let jitterBaseline = 0;
+  const calibJitter = [];
+  let score = 0;
+  let state = "calibrating";
+  const lastEventAt = {};
+  const overThreshold = { magnetic: false, vibration: false };
+
+  /* Écart-type circulaire d'une série d'angles, en degrés. */
+  function circularStd(arr) {
+    if (arr.length < 8) return 0;
+    let sx = 0, sy = 0;
+    for (const a of arr) { const r = a * Math.PI / 180; sx += Math.cos(r); sy += Math.sin(r); }
+    const R = Math.min(1, Math.hypot(sx, sy) / arr.length);
+    if (R < 1e-9) return 180;
+    return Math.sqrt(-2 * Math.log(R)) * 180 / Math.PI;
+  }
+
+  function onOrientation(e) {
+    let h = null;
+    if (typeof e.webkitCompassHeading === "number" && !Number.isNaN(e.webkitCompassHeading)) {
+      h = e.webkitCompassHeading;               // iOS : cap magnétique direct
+    } else if (e.absolute && typeof e.alpha === "number") {
+      h = (360 - e.alpha) % 360;                // Android : deviceorientationabsolute
+    }
+    if (h === null) return;
+    hasCompass = true;
+    const now = performance.now();
+    if (now - lastHeadingPush < 90) return;     // ~10 Hz suffit
+    if (rotationRate > 25) { headings.length = 0; return; } // on tourne : fenêtre invalide
+    lastHeadingPush = now;
+    headings.push(h);
+    if (headings.length > 20) headings.shift();
+  }
+
+  function onMotion(e) {
+    const rr = e.rotationRate;
+    if (rr) rotationRate = Math.max(Math.abs(rr.alpha || 0), Math.abs(rr.beta || 0), Math.abs(rr.gamma || 0));
+    let g = 0;
+    const a = e.acceleration;
+    if (a && a.x !== null) {
+      g = Math.hypot(a.x, a.y, a.z) / 9.81;
+    } else if (e.accelerationIncludingGravity && e.accelerationIncludingGravity.x !== null) {
+      const ag = e.accelerationIncludingGravity;
+      g = Math.abs(Math.hypot(ag.x, ag.y, ag.z) / 9.81 - 1);
+    } else return;
+    accWindow.push(g);
+    if (accWindow.length > 24) accWindow.shift();
+  }
+
+  /* ─── Journal & retour ────────────────────────────────────────────────── */
+  function pushEvent(kind, label, color) {
+    const t = Date.now();
+    if (t - (lastEventAt[kind] || 0) < COOLDOWN_MS) return;
+    lastEventAt[kind] = t;
+    if (kind !== "calibration" && navigator.vibrate) navigator.vibrate(60);
+    const li = document.createElement("li");
+    const time = new Date().toLocaleTimeString("fr-FR");
+    li.innerHTML = `<span class="dot" style="background:${color}"></span><time>${time}</time><span></span>`;
+    li.lastElementChild.textContent = label;
+    const journal = $("journal");
+    journal.prepend(li);
+    while (journal.children.length > 4) journal.lastElementChild.remove();
+  }
+
+  function calibrate() {
+    calibrating = true;
+    calibJitter.length = 0;
+    score = 0;
+    setState("calibrating");
+    $("recal").disabled = true;
+    setTimeout(() => {
+      jitterBaseline = calibJitter.length
+        ? calibJitter.reduce((a, b) => a + b, 0) / calibJitter.length : 0;
+      calibrating = false;
+      $("recal").disabled = false;
+      pushEvent("calibration", "Référence ambiante fixée", STATES.calibrating.color);
+    }, CALIBRATION_MS);
+  }
+
+  function setState(next) {
+    if (state === next) return;
+    state = next;
+    const meta = STATES[next];
+    document.documentElement.style.setProperty("--state", meta.color);
+    $("status").textContent = meta.label;
+  }
+
+  /* ─── Boucle de mesure (10 Hz) ────────────────────────────────────────── */
+  function tick() {
+    const rawJitter = circularStd(headings);
+    if (calibrating && rawJitter > 0) calibJitter.push(rawJitter);
+    const jitter = Math.max(0, rawJitter - jitterBaseline);
+
+    const vib = accWindow.length
+      ? Math.sqrt(accWindow.reduce((s, v) => s + v * v, 0) / accWindow.length) : 0;
+
+    if (!calibrating) {
+      const magScore = hasCompass ? Math.min(1, jitter / MAG_FULL_SCALE) : 0;
+      const vibScore = Math.min(1, vib / VIB_FULL_SCALE);
+      const raw = hasCompass ? 100 * (0.6 * magScore + 0.4 * vibScore) : 100 * vibScore;
+      score = score * 0.82 + raw * 0.18;
+      setState(score >= 65 ? "anomaly" : score >= 30 ? "active" : "calm");
+
+      if (hasCompass) {
+        if (jitter >= MAG_EVENT && !overThreshold.magnetic)
+          pushEvent("magnetic", `Perturbation magnétique · instabilité ${fmt.format(jitter)}°`, STATES.anomaly.color);
+        overThreshold.magnetic = jitter >= MAG_EVENT;
+      }
+      if (vib >= VIB_EVENT && !overThreshold.vibration)
+        pushEvent("vibration", `Vibration détectée · ${fmt2.format(vib)} g`, STATES.active.color);
+      overThreshold.vibration = vib >= VIB_EVENT;
+    }
+
+    $("score").textContent = calibrating ? "--" : String(Math.round(score));
+    $("arc").style.strokeDashoffset = String(251.33 * (1 - (calibrating ? 0 : score) / 100));
+    $("magVal").textContent = hasCompass ? `${fmt.format(jitter)} °` : "indisponible";
+    $("magBar").style.width = `${Math.min(100, Math.max(2, jitter / MAG_FULL_SCALE * 100))}%`;
+    $("vibVal").textContent = `${fmt2.format(vib)} g`;
+    $("vibBar").style.width = `${Math.min(100, Math.max(2, vib / VIB_FULL_SCALE * 100))}%`;
+  }
+
+  /* ─── Effets visuels (canvas) ─────────────────────────────────────────── */
+  const canvas = $("fx");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0;
+  function resize() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = canvas.clientWidth; H = canvas.clientHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener("resize", resize);
+
+  const stops = [
+    [0,   [52, 211, 153]],
+    [30,  [52, 211, 153]],
+    [65,  [251, 191, 36]],
+    [100, [244, 63, 94]],
+  ];
+  function scoreColor(s) {
+    for (let i = 1; i < stops.length; i++) {
+      if (s <= stops[i][0]) {
+        const [s0, c0] = stops[i - 1], [s1, c1] = stops[i];
+        const t = (s - s0) / (s1 - s0 || 1);
+        return c0.map((v, k) => Math.round(v + (c1[k] - v) * t));
+      }
+    }
+    return stops[stops.length - 1][1];
+  }
+
+  const orbs = Array.from({ length: 5 }, (_, i) => ({
+    seed: i * 137 + 41, size: 8 + (i % 3) * 5,
+  }));
+  let shownScore = 0;
+
+  function draw(tms) {
+    const t = tms / 1000;
+    shownScore += (score - shownScore) * 0.08;
+    const s = calibrating ? 8 : shownScore;
+    const [r, g, b] = calibrating ? [34, 211, 238] : scoreColor(s);
+    ctx.clearRect(0, 0, W, H);
+
+    // Halo de bord
+    const grad = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.hypot(W, H) / 2);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(1, `rgba(${r},${g},${b},${0.08 + s / 100 * 0.55})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    if (!reduceMotion) {
+      // Anneaux de balayage
+      const maxR = Math.min(W, H) * 0.46;
+      for (let i = 0; i < 3; i++) {
+        const p = ((t / 2.4) + i / 3) % 1;
+        const alpha = (0.3 + s / 100 * 0.4) * (1 - p) * (p < 0.06 ? p / 0.06 : 1);
+        ctx.beginPath();
+        ctx.arc(W / 2, H / 2, maxR * (0.15 + 0.85 * p), 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      // Orbes (forte activité seulement)
+      const gate = Math.max(0, Math.min(1, (s - 45) / 30));
+      if (gate > 0) {
+        for (const o of orbs) {
+          const x = W / 2 + Math.sin(t * 0.21 + o.seed) * W * 0.34 + Math.sin(t * 0.53 + o.seed * 2) * W * 0.08;
+          const y = H * 0.42 + Math.cos(t * 0.17 + o.seed) * H * 0.26 + Math.cos(t * 0.47 + o.seed * 3) * H * 0.06;
+          const pulse = 0.45 + 0.45 * Math.sin(t * 2 + o.seed);
+          const og = ctx.createRadialGradient(x, y, 0, x, y, o.size * 3);
+          og.addColorStop(0, `rgba(216,180,254,${0.85 * gate * pulse})`);
+          og.addColorStop(0.35, `rgba(168,85,247,${0.35 * gate * pulse})`);
+          og.addColorStop(1, "rgba(168,85,247,0)");
+          ctx.fillStyle = og;
+          ctx.beginPath(); ctx.arc(x, y, o.size * 3, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+
+  /* ─── Démarrage (geste utilisateur requis sur iOS) ────────────────────── */
+  function notice(msg) {
+    const el = $("notice");
+    el.textContent = msg;
+    el.style.display = msg ? "block" : "none";
+  }
+
+  async function start() {
+    $("start").disabled = true;
+    let motionOk = true;
+    try {
+      if (typeof DeviceMotionEvent !== "undefined" &&
+          typeof DeviceMotionEvent.requestPermission === "function") {
+        motionOk = (await DeviceMotionEvent.requestPermission()) === "granted";
+      }
+      if (typeof DeviceOrientationEvent !== "undefined" &&
+          typeof DeviceOrientationEvent.requestPermission === "function") {
+        await DeviceOrientationEvent.requestPermission();
+      }
+    } catch { motionOk = false; }
+
+    addEventListener("devicemotion", onMotion);
+    if ("ondeviceorientationabsolute" in window) {
+      addEventListener("deviceorientationabsolute", onOrientation);
+    }
+    addEventListener("deviceorientation", onOrientation);
+
+    let camOk = false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }, audio: false,
+      });
+      $("cam").srcObject = stream;
+      camOk = true;
+    } catch { /* refusée ou indisponible */ }
+
+    $("gate").remove();
+    $("hud").hidden = false;
+    resize();
+    requestAnimationFrame(draw);
+    setInterval(tick, TICK_MS);
+    calibrate();
+
+    if (!camOk && !motionOk) notice("Caméra et capteurs refusés — ouvrez la page dans Safari et autorisez les accès.");
+    else if (!camOk) notice("Caméra indisponible — mode capteurs seuls.");
+    else if (!motionOk) notice("Capteurs de mouvement refusés — rechargez la page pour réessayer.");
+    setTimeout(() => {
+      if (!hasCompass && motionOk) notice("Boussole non disponible sur cet appareil — détection par vibrations uniquement.");
+    }, 4000);
+  }
+
+  $("start").addEventListener("click", start);
+  $("recal").addEventListener("click", calibrate);
+})();
+</script>
