@@ -1,4 +1,4 @@
-<!-- Spectra v1.1.0 -->
+<!-- Spectra v1.2.0 -->
 <title>Spectra — Détecteur d'énergies</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 
@@ -228,8 +228,10 @@
       <p>
         Quand une perturbation est détectée, un <strong>orbe s’ancre dans la
         direction visée</strong> et reste « dans la pièce » quand vous bougez.
-        Le radar en haut à droite indique où le retrouver, et l’indicateur
-        d’approche vous dit si le signal se renforce quand vous avancez.
+        <strong>Violet</strong> = perturbation magnétique ·
+        <strong>doré</strong> = vibration. Le radar en haut à droite indique où
+        les retrouver, et l’indicateur d’approche vous dit si le signal se
+        renforce quand vous avancez.
       </p>
       <p class="fineprint">
         Les perturbations affichées ont des causes physiques ordinaires
@@ -272,6 +274,7 @@
   /* ─── État capteurs ───────────────────────────────────────────────────── */
   const headings = [];      // fenêtre d'échantillons boussole (°)
   const accWindow = [];     // fenêtre |accélération| (g)
+  const accBuf = [];        // {t, x, y, z} pour l'analyse de fréquence
   let lastHeadingPush = 0;
   let rotationRate = 0;     // °/s — pour ignorer la boussole quand on tourne
   let hasCompass = false;
@@ -323,25 +326,67 @@
     if (rr) rotationRate = Math.max(Math.abs(rr.alpha || 0), Math.abs(rr.beta || 0), Math.abs(rr.gamma || 0));
     let g = 0;
     const a = e.acceleration;
+    const src = (a && a.x !== null) ? a
+      : (e.accelerationIncludingGravity && e.accelerationIncludingGravity.x !== null
+        ? e.accelerationIncludingGravity : null);
+    if (!src) return;
     if (a && a.x !== null) {
       g = Math.hypot(a.x, a.y, a.z) / 9.81;
-    } else if (e.accelerationIncludingGravity && e.accelerationIncludingGravity.x !== null) {
-      const ag = e.accelerationIncludingGravity;
-      g = Math.abs(Math.hypot(ag.x, ag.y, ag.z) / 9.81 - 1);
-    } else return;
+    } else {
+      g = Math.abs(Math.hypot(src.x, src.y, src.z) / 9.81 - 1);
+    }
     accWindow.push(g);
     if (accWindow.length > 24) accWindow.shift();
+    accBuf.push({ t: performance.now(), x: src.x, y: src.y, z: src.z });
+    if (accBuf.length > 160) accBuf.shift();
+  }
+
+  /* ─── Fréquence dominante de la vibration (Hz) ────────────────────────────
+     DFT naïve fenêtrée (Hann) sur l'axe le plus actif des ~2 dernières
+     secondes. L'accéléromètre web échantillonne à ~50-60 Hz : on ne peut
+     résoudre que jusqu'à ~25 Hz (limite de Nyquist). */
+  function vibrationFrequency() {
+    const N = 96;
+    if (accBuf.length < N) return null;
+    const buf = accBuf.slice(-N);
+    const span = (buf[N - 1].t - buf[0].t) / 1000;
+    if (span <= 0.5) return null;
+    const sr = (N - 1) / span;
+    let best = null, bestVar = -1;
+    for (const axis of ["x", "y", "z"]) {
+      const mean = buf.reduce((s, v) => s + v[axis], 0) / N;
+      const centered = buf.map((v) => v[axis] - mean);
+      const variance = centered.reduce((s, v) => s + v * v, 0) / N;
+      if (variance > bestVar) { bestVar = variance; best = centered; }
+    }
+    if (!best) return null;
+    const win = best.map((v, i) => v * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1))));
+    const fMax = Math.min(25, sr / 2 - 1);
+    let peakF = 0, peakP = 0, total = 0;
+    for (let f = 1; f <= fMax; f += 0.5) {
+      let re = 0, im = 0;
+      for (let i = 0; i < N; i++) {
+        const ph = 2 * Math.PI * f * i / sr;
+        re += win[i] * Math.cos(ph);
+        im -= win[i] * Math.sin(ph);
+      }
+      const p = re * re + im * im;
+      total += p;
+      if (p > peakP) { peakP = p; peakF = f; }
+    }
+    if (!total || peakP / total < 0.15) return null; // pas de dominante nette
+    return peakF;
   }
 
   /* ─── Orbes ancrés dans la pièce ──────────────────────────────────────── */
   const anchors = [];
 
-  function anchorOrb(strength) {
+  function anchorOrb(strength, kind) {
     const now = performance.now();
     if (hasCompass) {
-      // Une nouvelle détection proche d'un orbe existant le « déplace » :
-      // il se ré-ancre sur la direction de la nouvelle mesure.
-      const near = anchors.find((o) => o.yaw !== null &&
+      // Une nouvelle détection de même nature proche d'un orbe existant le
+      // « déplace » : il se ré-ancre sur la direction de la nouvelle mesure.
+      const near = anchors.find((o) => o.yaw !== null && o.kind === kind &&
         Math.abs(angDiff(o.yaw, currentYaw)) < 28 && Math.abs(o.pitch - currentPitch) < 22);
       if (near) {
         near.yaw = (currentYaw + (Math.random() - 0.5) * 12 + 360) % 360;
@@ -354,14 +399,14 @@
         yaw: (currentYaw + (Math.random() - 0.5) * 16 + 360) % 360,
         pitch: currentPitch + (Math.random() - 0.5) * 12,
         sx: null, sy: null,
-        born: now, strength,
+        born: now, strength, kind,
       });
     } else {
       // Pas de boussole : orbe posé à une position fixe de l'écran.
       anchors.push({
         yaw: null, pitch: 0,
         sx: 0.2 + Math.random() * 0.6, sy: 0.2 + Math.random() * 0.45,
-        born: now, strength,
+        born: now, strength, kind,
       });
     }
     if (anchors.length > 4) anchors.shift();
@@ -443,6 +488,7 @@
 
     const vib = accWindow.length
       ? Math.sqrt(accWindow.reduce((s, v) => s + v * v, 0) / accWindow.length) : 0;
+    const vibFreq = vib >= 0.03 ? vibrationFrequency() : null;
 
     if (!calibrating) {
       const magScore = hasCompass ? Math.min(1, jitter / MAG_FULL_SCALE) : 0;
@@ -456,14 +502,17 @@
       if (hasCompass) {
         if (jitter >= MAG_EVENT && !overThreshold.magnetic) {
           if (pushEvent("magnetic", `Perturbation magnétique · instabilité ${fmt.format(jitter)}°`, STATES.anomaly.color)) {
-            anchorOrb(Math.min(1, jitter / MAG_FULL_SCALE));
+            anchorOrb(Math.min(1, jitter / MAG_FULL_SCALE), "magnetic");
           }
         }
         overThreshold.magnetic = jitter >= MAG_EVENT;
       }
       if (vib >= VIB_EVENT && !overThreshold.vibration) {
-        if (pushEvent("vibration", `Vibration détectée · ${fmt2.format(vib)} g`, STATES.active.color)) {
-          anchorOrb(Math.min(1, vib / VIB_FULL_SCALE));
+        const label = vibFreq !== null
+          ? `Vibration ${vibFreq < 8 ? "basse" : "haute"} · ${fmt.format(vibFreq)} Hz · ${fmt2.format(vib)} g`
+          : `Vibration détectée · ${fmt2.format(vib)} g`;
+        if (pushEvent("vibration", label, STATES.active.color)) {
+          anchorOrb(Math.min(1, vib / VIB_FULL_SCALE), "vibration");
         }
       }
       overThreshold.vibration = vib >= VIB_EVENT;
@@ -473,7 +522,9 @@
     $("arc").style.strokeDashoffset = String(251.33 * (1 - (calibrating ? 0 : score) / 100));
     $("magVal").textContent = hasCompass ? `${fmt.format(jitter)} °` : "indisponible";
     $("magBar").style.width = `${Math.min(100, Math.max(2, jitter / MAG_FULL_SCALE * 100))}%`;
-    $("vibVal").textContent = `${fmt2.format(vib)} g`;
+    $("vibVal").textContent = vibFreq !== null
+      ? `${fmt2.format(vib)} g · ${fmt.format(vibFreq)} Hz (${vibFreq < 8 ? "basse" : "haute"})`
+      : `${fmt2.format(vib)} g`;
     $("vibBar").style.width = `${Math.min(100, Math.max(2, vib / VIB_FULL_SCALE * 100))}%`;
   }
 
@@ -517,14 +568,22 @@
     return { x, y, off };
   }
 
-  function drawOrb(x, y, size, alpha) {
+  /* Palette des orbes selon la nature de la détection. */
+  const ORB_COLORS = {
+    magnetic:  { inner: "216,180,254", halo: "168,85,247",  core: "240,230,255" },
+    vibration: { inner: "253,224,71",  halo: "251,191,36",  core: "255,248,220" },
+  };
+  const orbColor = (kind) => ORB_COLORS[kind] || ORB_COLORS.magnetic;
+
+  function drawOrb(x, y, size, alpha, kind) {
+    const c = orbColor(kind);
     const og = ctx.createRadialGradient(x, y, 0, x, y, size * 3);
-    og.addColorStop(0, `rgba(216,180,254,${0.9 * alpha})`);
-    og.addColorStop(0.35, `rgba(168,85,247,${0.4 * alpha})`);
-    og.addColorStop(1, "rgba(168,85,247,0)");
+    og.addColorStop(0, `rgba(${c.inner},${0.9 * alpha})`);
+    og.addColorStop(0.35, `rgba(${c.halo},${0.4 * alpha})`);
+    og.addColorStop(1, `rgba(${c.halo},0)`);
     ctx.fillStyle = og;
     ctx.beginPath(); ctx.arc(x, y, size * 3, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = `rgba(240,230,255,${0.85 * alpha})`;
+    ctx.fillStyle = `rgba(${c.core},${0.85 * alpha})`;
     ctx.beginPath(); ctx.arc(x, y, size * 0.45, 0, Math.PI * 2); ctx.fill();
   }
 
@@ -560,7 +619,7 @@
       const rel = o.yaw === null ? 0 : angDiff(o.yaw, currentYaw) * Math.PI / 180;
       const px = cx + Math.sin(rel) * r * 0.72;
       const py = cy - Math.cos(rel) * r * 0.72;
-      ctx.fillStyle = `rgba(216,180,254,${0.35 + 0.6 * life})`;
+      ctx.fillStyle = `rgba(${orbColor(o.kind).inner},${0.35 + 0.6 * life})`;
       ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
     }
   }
@@ -607,12 +666,12 @@
       const size = 10 + o.strength * 12;
       const pos = orbScreenPos(o);
       if (!pos.off) {
-        drawOrb(pos.x, pos.y, size, alpha);
+        drawOrb(pos.x, pos.y, size, alpha, o.kind);
       } else {
         // Hors champ : petit repère au bord de l'écran, côté orbe
         const ex = Math.max(26, Math.min(W - 26, pos.x));
         const ey = Math.max(96, Math.min(H - 26, pos.y));
-        ctx.fillStyle = `rgba(216,180,254,${0.5 * fade})`;
+        ctx.fillStyle = `rgba(${orbColor(o.kind).inner},${0.5 * fade})`;
         ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill();
       }
     }
