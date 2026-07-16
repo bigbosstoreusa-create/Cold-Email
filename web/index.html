@@ -1,4 +1,4 @@
-<!-- Spectra v1.0.1 -->
+<!-- Spectra v1.1.0 -->
 <title>Spectra — Détecteur d'énergies</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 
@@ -47,7 +47,7 @@
   #journal { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
   #journal li {
     display: flex; align-items: center; gap: 7px; align-self: flex-start;
-    max-width: 95%; background: var(--panel); border: 1px solid var(--line);
+    max-width: 78%; background: var(--panel); border: 1px solid var(--line);
     border-radius: 10px; padding: 5px 10px; font-size: 11.5px;
   }
   #journal .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
@@ -87,9 +87,14 @@
   .gauge .unit { font-size: 9px; color: var(--muted); margin-top: -2px; }
 
   .readouts { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .statusline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   #status {
     font-size: 14px; font-weight: 800; letter-spacing: 0.18em;
     color: var(--state); transition: color 0.4s;
+  }
+  #trend {
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+    min-height: 13px; white-space: nowrap;
   }
   .readout { display: flex; flex-direction: column; gap: 4px; }
   .readout .head { display: flex; align-items: baseline; gap: 6px; }
@@ -186,7 +191,10 @@
         </div>
 
         <div class="readouts">
-          <span id="status">CALIBRATION…</span>
+          <div class="statusline">
+            <span id="status">CALIBRATION…</span>
+            <span id="trend"></span>
+          </div>
           <div class="readout">
             <div class="head">
               <span class="label">Perturbation magnétique (boussole)</span>
@@ -217,6 +225,12 @@
         boussole et détecteur de mouvement — et superpose leurs fluctuations à
         l’image de votre caméra sous forme d’« énergies ».
       </p>
+      <p>
+        Quand une perturbation est détectée, un <strong>orbe s’ancre dans la
+        direction visée</strong> et reste « dans la pièce » quand vous bougez.
+        Le radar en haut à droite indique où le retrouver, et l’indicateur
+        d’approche vous dit si le signal se renforce quand vous avancez.
+      </p>
       <p class="fineprint">
         Les perturbations affichées ont des causes physiques ordinaires
         (appareils électriques, métal, mouvements). Aucune preuve scientifique
@@ -240,6 +254,9 @@
   const MAG_EVENT = 3.5;        // seuil de journalisation (°)
   const VIB_EVENT = 0.22;       // seuil de journalisation (g)
   const COOLDOWN_MS = 4000;
+  const ORB_TTL = 11000;        // durée de vie d'un orbe ancré (ms)
+  const H_FOV = 62;             // champ de vision caméra supposé (°)
+  const V_FOV = 78;
   const STATES = {
     calibrating: { label: "CALIBRATION…", color: "#22d3ee" },
     calm:        { label: "CALME",        color: "#34d399" },
@@ -258,6 +275,8 @@
   let lastHeadingPush = 0;
   let rotationRate = 0;     // °/s — pour ignorer la boussole quand on tourne
   let hasCompass = false;
+  let currentYaw = 0;       // cap actuel de la caméra (°)
+  let currentPitch = 0;     // inclinaison actuelle (° ; 0 = à l'horizontale)
   let calibrating = true;
   let jitterBaseline = 0;
   const calibJitter = [];
@@ -265,6 +284,10 @@
   let state = "calibrating";
   const lastEventAt = {};
   const overThreshold = { magnetic: false, vibration: false };
+  const scoreHistory = [];  // {t, v} pour l'indicateur d'approche
+
+  /* Différence angulaire signée a-b, ramenée à [-180, 180]. */
+  const angDiff = (a, b) => ((a - b + 540) % 360) - 180;
 
   /* Écart-type circulaire d'une série d'angles, en degrés. */
   function circularStd(arr) {
@@ -277,6 +300,7 @@
   }
 
   function onOrientation(e) {
+    if (typeof e.beta === "number") currentPitch = Math.max(-80, Math.min(80, e.beta - 90));
     let h = null;
     if (typeof e.webkitCompassHeading === "number" && !Number.isNaN(e.webkitCompassHeading)) {
       h = e.webkitCompassHeading;               // iOS : cap magnétique direct
@@ -285,6 +309,7 @@
     }
     if (h === null) return;
     hasCompass = true;
+    currentYaw = h;
     const now = performance.now();
     if (now - lastHeadingPush < 90) return;     // ~10 Hz suffit
     if (rotationRate > 25) { headings.length = 0; return; } // on tourne : fenêtre invalide
@@ -308,10 +333,44 @@
     if (accWindow.length > 24) accWindow.shift();
   }
 
+  /* ─── Orbes ancrés dans la pièce ──────────────────────────────────────── */
+  const anchors = [];
+
+  function anchorOrb(strength) {
+    const now = performance.now();
+    if (hasCompass) {
+      // Une nouvelle détection proche d'un orbe existant le « déplace » :
+      // il se ré-ancre sur la direction de la nouvelle mesure.
+      const near = anchors.find((o) => o.yaw !== null &&
+        Math.abs(angDiff(o.yaw, currentYaw)) < 28 && Math.abs(o.pitch - currentPitch) < 22);
+      if (near) {
+        near.yaw = (currentYaw + (Math.random() - 0.5) * 12 + 360) % 360;
+        near.pitch = currentPitch + (Math.random() - 0.5) * 8;
+        near.born = now;
+        near.strength = Math.max(near.strength, strength);
+        return;
+      }
+      anchors.push({
+        yaw: (currentYaw + (Math.random() - 0.5) * 16 + 360) % 360,
+        pitch: currentPitch + (Math.random() - 0.5) * 12,
+        sx: null, sy: null,
+        born: now, strength,
+      });
+    } else {
+      // Pas de boussole : orbe posé à une position fixe de l'écran.
+      anchors.push({
+        yaw: null, pitch: 0,
+        sx: 0.2 + Math.random() * 0.6, sy: 0.2 + Math.random() * 0.45,
+        born: now, strength,
+      });
+    }
+    if (anchors.length > 4) anchors.shift();
+  }
+
   /* ─── Journal & retour ────────────────────────────────────────────────── */
   function pushEvent(kind, label, color) {
     const t = Date.now();
-    if (t - (lastEventAt[kind] || 0) < COOLDOWN_MS) return;
+    if (t - (lastEventAt[kind] || 0) < COOLDOWN_MS) return false;
     lastEventAt[kind] = t;
     if (kind !== "calibration" && navigator.vibrate) navigator.vibrate(60);
     const li = document.createElement("li");
@@ -321,11 +380,13 @@
     const journal = $("journal");
     journal.prepend(li);
     while (journal.children.length > 4) journal.lastElementChild.remove();
+    return true;
   }
 
   function calibrate() {
     calibrating = true;
     calibJitter.length = 0;
+    scoreHistory.length = 0;
     score = 0;
     setState("calibrating");
     $("recal").disabled = true;
@@ -346,8 +407,36 @@
     $("status").textContent = meta.label;
   }
 
+  /* ─── Indicateur d'approche (gradient d'intensité) ────────────────────── */
+  let lastTrendUpdate = 0;
+  function updateTrend(now) {
+    if (now - lastTrendUpdate < 500) return;
+    lastTrendUpdate = now;
+    const el = $("trend");
+    while (scoreHistory.length && now - scoreHistory[0].t > 2600) scoreHistory.shift();
+    if (calibrating || score < 15 || scoreHistory.length < 12) { el.textContent = ""; return; }
+    const mid = now - 1000;
+    let rSum = 0, rN = 0, oSum = 0, oN = 0;
+    for (const s of scoreHistory) {
+      if (s.t >= mid) { rSum += s.v; rN++; } else { oSum += s.v; oN++; }
+    }
+    if (!rN || !oN) { el.textContent = ""; return; }
+    const slope = rSum / rN - oSum / oN;
+    if (slope > 4) {
+      el.textContent = "▲ signal en approche";
+      el.style.color = "var(--state)";
+    } else if (slope < -4) {
+      el.textContent = "▼ signal s’éloigne";
+      el.style.color = "var(--muted)";
+    } else {
+      el.textContent = "— signal stable";
+      el.style.color = "var(--muted)";
+    }
+  }
+
   /* ─── Boucle de mesure (10 Hz) ────────────────────────────────────────── */
   function tick() {
+    const now = performance.now();
     const rawJitter = circularStd(headings);
     if (calibrating && rawJitter > 0) calibJitter.push(rawJitter);
     const jitter = Math.max(0, rawJitter - jitterBaseline);
@@ -360,15 +449,23 @@
       const vibScore = Math.min(1, vib / VIB_FULL_SCALE);
       const raw = hasCompass ? 100 * (0.6 * magScore + 0.4 * vibScore) : 100 * vibScore;
       score = score * 0.82 + raw * 0.18;
+      scoreHistory.push({ t: now, v: score });
       setState(score >= 65 ? "anomaly" : score >= 30 ? "active" : "calm");
+      updateTrend(now);
 
       if (hasCompass) {
-        if (jitter >= MAG_EVENT && !overThreshold.magnetic)
-          pushEvent("magnetic", `Perturbation magnétique · instabilité ${fmt.format(jitter)}°`, STATES.anomaly.color);
+        if (jitter >= MAG_EVENT && !overThreshold.magnetic) {
+          if (pushEvent("magnetic", `Perturbation magnétique · instabilité ${fmt.format(jitter)}°`, STATES.anomaly.color)) {
+            anchorOrb(Math.min(1, jitter / MAG_FULL_SCALE));
+          }
+        }
         overThreshold.magnetic = jitter >= MAG_EVENT;
       }
-      if (vib >= VIB_EVENT && !overThreshold.vibration)
-        pushEvent("vibration", `Vibration détectée · ${fmt2.format(vib)} g`, STATES.active.color);
+      if (vib >= VIB_EVENT && !overThreshold.vibration) {
+        if (pushEvent("vibration", `Vibration détectée · ${fmt2.format(vib)} g`, STATES.active.color)) {
+          anchorOrb(Math.min(1, vib / VIB_FULL_SCALE));
+        }
+      }
       overThreshold.vibration = vib >= VIB_EVENT;
     }
 
@@ -409,13 +506,69 @@
     return stops[stops.length - 1][1];
   }
 
-  const orbs = Array.from({ length: 5 }, (_, i) => ({
-    seed: i * 137 + 41, size: 8 + (i % 3) * 5,
-  }));
-  let shownScore = 0;
+  /* Position écran d'un orbe ancré, selon l'orientation actuelle. */
+  function orbScreenPos(o) {
+    if (o.yaw === null) return { x: o.sx * W, y: o.sy * H, off: false };
+    const dyaw = angDiff(o.yaw, currentYaw);
+    const dpitch = o.pitch - currentPitch;
+    const x = W / 2 + (dyaw / H_FOV) * W;
+    const y = H / 2 - (dpitch / V_FOV) * H;
+    const off = Math.abs(dyaw) > H_FOV * 0.72 || Math.abs(dpitch) > V_FOV * 0.72;
+    return { x, y, off };
+  }
 
+  function drawOrb(x, y, size, alpha) {
+    const og = ctx.createRadialGradient(x, y, 0, x, y, size * 3);
+    og.addColorStop(0, `rgba(216,180,254,${0.9 * alpha})`);
+    og.addColorStop(0.35, `rgba(168,85,247,${0.4 * alpha})`);
+    og.addColorStop(1, "rgba(168,85,247,0)");
+    ctx.fillStyle = og;
+    ctx.beginPath(); ctx.arc(x, y, size * 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(240,230,255,${0.85 * alpha})`;
+    ctx.beginPath(); ctx.arc(x, y, size * 0.45, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /* Radar : points aux directions des orbes, midi = droit devant. */
+  function drawRadar(t) {
+    const r = 30;
+    const cx = W - r - 18;
+    const cy = r + 74;
+    ctx.strokeStyle = "rgba(148,163,184,0.4)";
+    ctx.fillStyle = "rgba(6,10,22,0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = "rgba(148,163,184,0.18)";
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2); ctx.stroke();
+    // repère « droit devant »
+    ctx.strokeStyle = "rgba(148,163,184,0.45)";
+    ctx.beginPath(); ctx.moveTo(cx, cy - r + 2); ctx.lineTo(cx, cy - r + 7); ctx.stroke();
+    // balayage
+    if (!reduceMotion) {
+      const a = (t * 1.4) % (Math.PI * 2);
+      ctx.strokeStyle = "rgba(167,139,250,0.35)";
+      ctx.beginPath(); ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.sin(a) * r * 0.92, cy - Math.cos(a) * r * 0.92); ctx.stroke();
+    }
+    // vous
+    ctx.fillStyle = "rgba(230,233,242,0.9)";
+    ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
+    // orbes
+    const now = performance.now();
+    for (const o of anchors) {
+      const life = 1 - (now - o.born) / ORB_TTL;
+      if (life <= 0) continue;
+      const rel = o.yaw === null ? 0 : angDiff(o.yaw, currentYaw) * Math.PI / 180;
+      const px = cx + Math.sin(rel) * r * 0.72;
+      const py = cy - Math.cos(rel) * r * 0.72;
+      ctx.fillStyle = `rgba(216,180,254,${0.35 + 0.6 * life})`;
+      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  let shownScore = 0;
   function draw(tms) {
     const t = tms / 1000;
+    const now = performance.now();
     shownScore += (score - shownScore) * 0.08;
     const s = calibrating ? 8 : shownScore;
     const [r, g, b] = calibrating ? [34, 211, 238] : scoreColor(s);
@@ -440,22 +593,31 @@
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
-      // Orbes (forte activité seulement)
-      const gate = Math.max(0, Math.min(1, (s - 45) / 30));
-      if (gate > 0) {
-        for (const o of orbs) {
-          const x = W / 2 + Math.sin(t * 0.21 + o.seed) * W * 0.34 + Math.sin(t * 0.53 + o.seed * 2) * W * 0.08;
-          const y = H * 0.42 + Math.cos(t * 0.17 + o.seed) * H * 0.26 + Math.cos(t * 0.47 + o.seed * 3) * H * 0.06;
-          const pulse = 0.45 + 0.45 * Math.sin(t * 2 + o.seed);
-          const og = ctx.createRadialGradient(x, y, 0, x, y, o.size * 3);
-          og.addColorStop(0, `rgba(216,180,254,${0.85 * gate * pulse})`);
-          og.addColorStop(0.35, `rgba(168,85,247,${0.35 * gate * pulse})`);
-          og.addColorStop(1, "rgba(168,85,247,0)");
-          ctx.fillStyle = og;
-          ctx.beginPath(); ctx.arc(x, y, o.size * 3, 0, Math.PI * 2); ctx.fill();
-        }
+    }
+
+    // Orbes ancrés
+    for (let i = anchors.length - 1; i >= 0; i--) {
+      const o = anchors[i];
+      const age = now - o.born;
+      if (age > ORB_TTL) { anchors.splice(i, 1); continue; }
+      const life = 1 - age / ORB_TTL;
+      const fade = Math.min(1, age / 500) * Math.min(1, life / 0.18);
+      const pulse = reduceMotion ? 0.8 : 0.7 + 0.3 * Math.sin(t * 2.4 + o.born);
+      const alpha = fade * pulse;
+      const size = 10 + o.strength * 12;
+      const pos = orbScreenPos(o);
+      if (!pos.off) {
+        drawOrb(pos.x, pos.y, size, alpha);
+      } else {
+        // Hors champ : petit repère au bord de l'écran, côté orbe
+        const ex = Math.max(26, Math.min(W - 26, pos.x));
+        const ey = Math.max(96, Math.min(H - 26, pos.y));
+        ctx.fillStyle = `rgba(216,180,254,${0.5 * fade})`;
+        ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill();
       }
     }
+
+    drawRadar(t);
     requestAnimationFrame(draw);
   }
 
