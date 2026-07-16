@@ -1,4 +1,4 @@
-<!-- Spectra v1.2.0 -->
+<!-- Spectra v1.3.0 -->
 <title>Spectra — Détecteur d'énergies</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 
@@ -46,12 +46,14 @@
 
   #journal { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
   #journal li {
-    display: flex; align-items: center; gap: 7px; align-self: flex-start;
+    display: flex; align-items: flex-start; gap: 7px; align-self: flex-start;
     max-width: 78%; background: var(--panel); border: 1px solid var(--line);
     border-radius: 10px; padding: 5px 10px; font-size: 11.5px;
   }
-  #journal .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-  #journal time { color: var(--muted); font-family: var(--mono); font-size: 10px; }
+  #journal .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin-top: 4px; }
+  #journal time { color: var(--muted); font-family: var(--mono); font-size: 10px; margin-top: 2px; }
+  #journal .msg { display: flex; flex-direction: column; }
+  #journal .cause { color: var(--muted); font-size: 10px; }
   #journal li:nth-child(2) { opacity: 0.78; }
   #journal li:nth-child(3) { opacity: 0.56; }
   #journal li:nth-child(4) { opacity: 0.34; }
@@ -114,12 +116,38 @@
     font: inherit; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  #recal {
-    display: flex; align-items: center; justify-content: center; gap: 8px;
+  .btnrow { display: flex; gap: 8px; }
+  .btnrow button {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
     padding: 11px; border-radius: 12px; background: rgba(51, 65, 85, 0.6);
     color: var(--ink); font-size: 13px; font-weight: 600;
   }
-  #recal:disabled { opacity: 0.5; cursor: default; }
+  .btnrow button:disabled { opacity: 0.5; cursor: default; }
+  #bodyBtn { background: rgba(124, 58, 237, 0.45); }
+
+  /* ─── Mesure de vibration personnelle ─────────────────────────────────── */
+  #bodyModal {
+    position: absolute; inset: 0; z-index: 20; display: flex;
+    align-items: center; justify-content: center; padding: 22px;
+    background: rgba(2, 6, 23, 0.75);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  #bodyModal[hidden] { display: none; }
+  #bodyModal h2 {
+    margin: 0; font-size: 15px; font-weight: 800; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  #bodyLive {
+    font-family: var(--mono); font-size: 30px; font-weight: 700;
+    font-variant-numeric: tabular-nums; color: var(--ink); min-height: 38px;
+  }
+  #bodyResult { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+  .bodyStat {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    border-bottom: 1px solid var(--line); padding-bottom: 6px;
+  }
+  .bodyStat .k { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; text-align: left; }
+  .bodyStat .v { font-family: var(--mono); font-size: 14px; font-weight: 700; white-space: nowrap; }
 
   /* ─── Écran d'accueil ─────────────────────────────────────────────────── */
   #gate {
@@ -211,7 +239,28 @@
           </div>
         </div>
       </div>
-      <button id="recal" type="button">Recalibrer l’environnement</button>
+      <div class="btnrow">
+        <button id="recal" type="button">Recalibrer</button>
+        <button id="bodyBtn" type="button">Ma vibration</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="bodyModal" hidden>
+    <div class="gate-card">
+      <h2>Vibration personnelle</h2>
+      <p id="bodyText">
+        Posez le téléphone bien à plat sur votre paume ouverte, bras détendu,
+        et restez aussi immobile que possible pendant 10 secondes. L’app va
+        mesurer votre <strong>tremblement physiologique</strong> — le
+        micro-tremblement musculaire réel que chaque personne émet (6–12 Hz).
+      </p>
+      <div id="bodyLive" hidden>—</div>
+      <div id="bodyResult" hidden></div>
+      <div class="btnrow" style="width:100%">
+        <button id="bodyGo" type="button">Commencer la mesure</button>
+        <button id="bodyClose" type="button">Fermer</button>
+      </div>
     </div>
   </div>
 
@@ -275,6 +324,8 @@
   const headings = [];      // fenêtre d'échantillons boussole (°)
   const accWindow = [];     // fenêtre |accélération| (g)
   const accBuf = [];        // {t, x, y, z} pour l'analyse de fréquence
+  let bodyMeasuring = false;
+  const bodySamples = [];   // échantillons de la mesure personnelle
   let lastHeadingPush = 0;
   let rotationRate = 0;     // °/s — pour ignorer la boussole quand on tourne
   let hasCompass = false;
@@ -339,6 +390,7 @@
     if (accWindow.length > 24) accWindow.shift();
     accBuf.push({ t: performance.now(), x: src.x, y: src.y, z: src.z });
     if (accBuf.length > 160) accBuf.shift();
+    if (bodyMeasuring) bodySamples.push({ t: performance.now(), x: src.x, y: src.y, z: src.z });
   }
 
   /* ─── Fréquence dominante de la vibration (Hz) ────────────────────────────
@@ -413,19 +465,39 @@
   }
 
   /* ─── Journal & retour ────────────────────────────────────────────────── */
-  function pushEvent(kind, label, color) {
+  function pushEvent(kind, label, color, cause) {
     const t = Date.now();
     if (t - (lastEventAt[kind] || 0) < COOLDOWN_MS) return false;
     lastEventAt[kind] = t;
     if (kind !== "calibration" && navigator.vibrate) navigator.vibrate(60);
     const li = document.createElement("li");
     const time = new Date().toLocaleTimeString("fr-FR");
-    li.innerHTML = `<span class="dot" style="background:${color}"></span><time>${time}</time><span></span>`;
-    li.lastElementChild.textContent = label;
+    li.innerHTML = `<span class="dot" style="background:${color}"></span><time>${time}</time><span class="msg"></span>`;
+    const msg = li.querySelector(".msg");
+    msg.textContent = label;
+    if (cause) {
+      const c = document.createElement("span");
+      c.className = "cause";
+      c.textContent = `→ ${cause}`;
+      msg.appendChild(c);
+    }
     const journal = $("journal");
     journal.prepend(li);
     while (journal.children.length > 4) journal.lastElementChild.remove();
     return true;
+  }
+
+  /* Cause physique probable d'une détection, selon la signature du signal. */
+  function magneticCause(vib) {
+    return vib > 0.08
+      ? "téléphone en mouvement — refaites la visée immobile"
+      : "probable : appareil électrique, câblage ou métal proche";
+  }
+  function vibrationCause(freq) {
+    if (freq === null) return "probable : choc ou secousse isolée";
+    if (freq < 3) return "probable : pas, déplacement ou choc";
+    if (freq < 8) return "probable : mouvement humain (main, corps)";
+    return "probable : machine ou moteur en marche";
   }
 
   function calibrate() {
@@ -501,7 +573,8 @@
 
       if (hasCompass) {
         if (jitter >= MAG_EVENT && !overThreshold.magnetic) {
-          if (pushEvent("magnetic", `Perturbation magnétique · instabilité ${fmt.format(jitter)}°`, STATES.anomaly.color)) {
+          if (pushEvent("magnetic", `Perturbation magnétique · instabilité ${fmt.format(jitter)}°`,
+              STATES.anomaly.color, magneticCause(vib))) {
             anchorOrb(Math.min(1, jitter / MAG_FULL_SCALE), "magnetic");
           }
         }
@@ -511,7 +584,7 @@
         const label = vibFreq !== null
           ? `Vibration ${vibFreq < 8 ? "basse" : "haute"} · ${fmt.format(vibFreq)} Hz · ${fmt2.format(vib)} g`
           : `Vibration détectée · ${fmt2.format(vib)} g`;
-        if (pushEvent("vibration", label, STATES.active.color)) {
+        if (pushEvent("vibration", label, STATES.active.color, vibrationCause(vibFreq))) {
           anchorOrb(Math.min(1, vib / VIB_FULL_SCALE), "vibration");
         }
       }
@@ -730,6 +803,122 @@
       if (!hasCompass && motionOk) notice("Boussole non disponible sur cet appareil — détection par vibrations uniquement.");
     }, 4000);
   }
+
+  /* ─── Mesure de la vibration personnelle (tremblement physiologique) ──── */
+  const bodyModal = $("bodyModal"), bodyText = $("bodyText"),
+        bodyLive = $("bodyLive"), bodyResult = $("bodyResult"), bodyGo = $("bodyGo");
+
+  function analyzeBody() {
+    const N = bodySamples.length;
+    if (N < 150) return null;
+    const span = (bodySamples[N - 1].t - bodySamples[0].t) / 1000;
+    if (span <= 3) return null;
+    const sr = (N - 1) / span;
+    // Moyenne glissante (~0,5 s) retirée : élimine gravité et dérive lente
+    const w = Math.max(4, Math.round(sr * 0.25));
+    let best = null, bestVar = -1;
+    for (const axis of ["x", "y", "z"]) {
+      const vals = bodySamples.map((s) => s[axis]);
+      const centered = new Array(N);
+      for (let i = 0; i < N; i++) {
+        let sum = 0, n = 0;
+        for (let j = Math.max(0, i - w); j <= Math.min(N - 1, i + w); j++) { sum += vals[j]; n++; }
+        centered[i] = vals[i] - sum / n;
+      }
+      const variance = centered.reduce((s, v) => s + v * v, 0) / N;
+      if (variance > bestVar) { bestVar = variance; best = centered; }
+    }
+    const rms = Math.sqrt(bestVar) / 9.81; // en g
+    const win = best.map((v, i) => v * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1))));
+    let peakF = 0, peakP = 0;
+    for (let f = 4; f <= 14; f += 0.25) {
+      let re = 0, im = 0;
+      for (let i = 0; i < N; i++) {
+        const ph = 2 * Math.PI * f * i / sr;
+        re += win[i] * Math.cos(ph);
+        im -= win[i] * Math.sin(ph);
+      }
+      const p = re * re + im * im;
+      if (p > peakP) { peakP = p; peakF = f; }
+    }
+    const calm = Math.round(Math.max(0, Math.min(100, 100 * (1 - rms / 0.012))));
+    return { freq: peakF, rms, calm };
+  }
+
+  function openBody() {
+    bodyModal.hidden = false;
+    bodyResult.hidden = true;
+    bodyResult.innerHTML = "";
+    bodyLive.hidden = true;
+    bodyText.hidden = false;
+    bodyText.innerHTML = "Posez le téléphone bien à plat sur votre paume ouverte, " +
+      "bras détendu, et restez aussi immobile que possible pendant 10 secondes. " +
+      "L’app va mesurer votre <strong>tremblement physiologique</strong> — le " +
+      "micro-tremblement musculaire réel que chaque personne émet (6–12 Hz).";
+    bodyGo.disabled = false;
+    bodyGo.textContent = "Commencer la mesure";
+  }
+
+  function startBodyMeasure() {
+    bodySamples.length = 0;
+    bodyMeasuring = true;
+    bodyGo.disabled = true;
+    bodyText.textContent = "Mesure en cours… restez immobile.";
+    bodyResult.hidden = true;
+    bodyLive.hidden = false;
+    const t0 = performance.now();
+    const iv = setInterval(() => {
+      if (bodyModal.hidden) { clearInterval(iv); bodyMeasuring = false; return; }
+      const left = Math.max(0, 10 - (performance.now() - t0) / 1000);
+      bodyLive.textContent = `${Math.ceil(left)} s`;
+      if (left <= 0) {
+        clearInterval(iv);
+        bodyMeasuring = false;
+        showBodyResult(analyzeBody());
+      }
+    }, 200);
+  }
+
+  function showBodyResult(res) {
+    bodyLive.hidden = true;
+    bodyGo.disabled = false;
+    bodyGo.textContent = "Refaire la mesure";
+    if (!res) {
+      bodyText.hidden = false;
+      bodyText.textContent = "Mesure impossible — les capteurs de mouvement n’ont " +
+        "pas fourni assez de données. Rechargez la page et autorisez les capteurs.";
+      return;
+    }
+    bodyText.hidden = true;
+    bodyResult.hidden = false;
+    bodyResult.innerHTML = "";
+    const rows = [
+      ["Fréquence du tremblement", `${fmt.format(res.freq)} Hz`],
+      ["Amplitude", `${res.rms.toFixed(4).replace(".", ",")} g`],
+      ["Indice de calme", `${res.calm} / 100`],
+    ];
+    for (const [k, v] of rows) {
+      const d = document.createElement("div");
+      d.className = "bodyStat";
+      const ks = document.createElement("span"); ks.className = "k"; ks.textContent = k;
+      const vs = document.createElement("span"); vs.className = "v"; vs.textContent = v;
+      d.append(ks, vs);
+      bodyResult.appendChild(d);
+    }
+    const note = document.createElement("p");
+    note.className = "fineprint";
+    note.style.margin = "0";
+    note.textContent = "C’est votre tremblement physiologique : un micro-tremblement " +
+      "musculaire réel (6–12 Hz chez tout le monde), qui varie avec le stress, la " +
+      "caféine, la fatigue ou l’effort. Ce n’est pas une « fréquence spirituelle », " +
+      "mais c’est bien la signature vibratoire de votre corps à cet instant.";
+    bodyResult.appendChild(note);
+    pushEvent("body", `Vibration personnelle · ${fmt.format(res.freq)} Hz · calme ${res.calm}/100`, "#22d3ee");
+  }
+
+  $("bodyBtn").addEventListener("click", openBody);
+  $("bodyClose").addEventListener("click", () => { bodyMeasuring = false; bodyModal.hidden = true; });
+  bodyGo.addEventListener("click", startBodyMeasure);
 
   $("start").addEventListener("click", start);
   $("recal").addEventListener("click", calibrate);
