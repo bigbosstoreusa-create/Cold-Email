@@ -1,0 +1,13 @@
+# Runtime data — uploaded videos & generated clips stay local
+data/
+clips/
+*.mp4
+*.mov
+*.mkv
+*.srt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
