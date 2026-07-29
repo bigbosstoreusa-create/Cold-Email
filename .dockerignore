@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+data
+.git
+.gitignore
+.gitconfig
+.emergent
+memory
+test_reports
+test_result.md
+*.md
+Dockerfile
+.dockerignore

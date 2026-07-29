@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>CyberAudit - Scanner de securite</title>
+  <meta name="description" content="Scanner de securite de sites web non intrusif avec rapports PDF professionnels." />
+
+  <!-- Theme / PWA -->
+  <meta name="theme-color" content="#0D0D0F" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+
+  <!-- iOS -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="CyberAudit" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+  <!-- ===================== ECRAN DE DEVERROUILLAGE ===================== -->
+  <div id="unlock" class="unlock" hidden>
+    <div class="unlock-card">
+      <div class="brand-row">
+        <span class="brand-logo" aria-hidden="true"></span>
+        <span class="brand-name" id="unlockBrand">CyberAudit</span>
+      </div>
+      <p class="unlock-tagline" data-i18n="unlock.subtitle"></p>
+
+      <div class="price-tag">
+        <span class="price-amount" id="priceAmount">$29</span>
+        <span class="price-per" data-i18n="unlock.priceOnce"></span>
+      </div>
+
+      <ul class="features" id="featuresList"><!-- rempli par JS --></ul>
+
+      <a id="getAccessBtn" class="btn btn-accent btn-block" target="_blank" rel="noopener" data-i18n="unlock.getAccess"></a>
+
+      <div class="divider"><span data-i18n="unlock.or"></span></div>
+
+      <!-- Deverrouillage par cle -->
+      <div id="keyForm">
+        <label class="field-label" data-i18n="unlock.haveKey"></label>
+        <div class="inline-form">
+          <input type="text" id="accessKeyInput" class="input" autocomplete="off" spellcheck="false" data-i18n-ph="unlock.keyPlaceholder" />
+          <button id="unlockBtn" class="btn btn-accent" data-i18n="unlock.unlockBtn"></button>
+        </div>
+        <p class="msg" id="keyMsg" role="alert"></p>
+        <button id="showAdminBtn" class="link-btn" data-i18n="unlock.adminLink"></button>
+      </div>
+
+      <!-- Connexion admin -->
+      <div id="adminForm" hidden>
+        <label class="field-label" data-i18n="unlock.adminTitle"></label>
+        <input type="email" id="adminEmail" class="input" autocomplete="username" data-i18n-ph="unlock.emailPlaceholder" />
+        <input type="password" id="adminPassword" class="input" autocomplete="current-password" data-i18n-ph="unlock.passwordPlaceholder" />
+        <button id="adminBtn" class="btn btn-accent btn-block" data-i18n="unlock.adminBtn"></button>
+        <p class="msg" id="adminMsg" role="alert"></p>
+        <button id="backToKeyBtn" class="link-btn" data-i18n="unlock.backLink"></button>
+      </div>
+
+      <p class="legal-note" data-i18n="unlock.legalNote"></p>
+
+      <div class="lang-row">
+        <select id="unlockLangSelect" class="lang-select" aria-label="Langue / Language">
+          <option value="fr">🇫🇷 Francais</option>
+          <option value="en">🇬🇧 English</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== APPLICATION ===================== -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand-row">
+          <span class="brand-logo" aria-hidden="true"></span>
+          <span class="brand-name" id="appBrand">CyberAudit</span>
+          <span id="adminBadge" class="badge" hidden data-i18n="app.admin"></span>
+        </div>
+        <div class="topbar-actions">
+          <select id="langSelect" class="lang-select" aria-label="Langue / Language">
+            <option value="fr">🇫🇷 Francais</option>
+            <option value="en">🇬🇧 English</option>
+          </select>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+
+      <!-- Avertissement legal -->
+      <div class="warning-banner" role="note">
+        <span class="warning-icon" aria-hidden="true">!</span>
+        <span data-i18n="warn.authorized"></span>
+      </div>
+
+      <!-- Formulaire d'audit -->
+      <section class="panel">
+        <h1 class="panel-title" data-i18n="form.title"></h1>
+        <p class="panel-sub" data-i18n="form.subtitle"></p>
+
+        <label class="field-label" for="domainInput" data-i18n="form.domain"></label>
+        <input type="text" id="domainInput" class="input input-lg" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-ph="form.domainPlaceholder" />
+
+        <div class="grid-menus">
+          <div class="menu-field">
+            <label class="field-label" for="sectorSelect" data-i18n="form.sector"></label>
+            <select id="sectorSelect" class="select"></select>
+          </div>
+          <div class="menu-field">
+            <label class="field-label" for="depthSelect" data-i18n="form.depth"></label>
+            <select id="depthSelect" class="select"></select>
+          </div>
+          <div class="menu-field">
+            <label class="field-label" for="currencySelect" data-i18n="form.currency"></label>
+            <select id="currencySelect" class="select"></select>
+          </div>
+          <div class="menu-field">
+            <label class="field-label" for="templateSelect" data-i18n="form.template"></label>
+            <select id="templateSelect" class="select"></select>
+          </div>
+          <div class="menu-field">
+            <label class="field-label" for="toneSelect" data-i18n="form.tone"></label>
+            <select id="toneSelect" class="select"></select>
+          </div>
+          <div class="menu-field">
+            <label class="field-label" for="formatSelect" data-i18n="form.format"></label>
+            <select id="formatSelect" class="select"></select>
+          </div>
+          <div class="menu-field menu-field-wide">
+            <label class="field-label" for="competitorInput" data-i18n="form.competitor"></label>
+            <input type="text" id="competitorInput" class="input" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-ph="form.competitorPlaceholder" />
+          </div>
+        </div>
+
+        <button id="runBtn" class="btn btn-accent btn-block btn-lg" data-i18n="form.run"></button>
+      </section>
+
+      <!-- Marque blanche -->
+      <section class="panel brand-panel">
+        <button id="brandToggle" class="collapse-header" aria-expanded="false">
+          <span data-i18n="brandPanel.title"></span>
+          <span class="chevron" aria-hidden="true"></span>
+        </button>
+        <div id="brandBody" class="collapse-body" hidden>
+          <div class="grid-menus">
+            <div class="menu-field">
+              <label class="field-label" for="brandNameInput" data-i18n="brandPanel.nameLabel"></label>
+              <input type="text" id="brandNameInput" class="input" maxlength="40" data-i18n-ph="brandPanel.namePlaceholder" />
+            </div>
+            <div class="menu-field">
+              <label class="field-label" for="accentInput" data-i18n="brandPanel.colorLabel"></label>
+              <div class="color-row">
+                <input type="color" id="accentInput" class="color-input" value="#F26419" />
+                <code id="accentValue" class="accent-value">#F26419</code>
+                <button id="resetBrandBtn" class="link-btn" data-i18n="brandPanel.reset"></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Chargement -->
+      <div id="loading" class="loading" hidden>
+        <div class="spinner" aria-hidden="true"></div>
+        <span data-i18n="form.running"></span>
+      </div>
+
+      <!-- Resultats (construits par JS) -->
+      <section id="results" class="results" hidden></section>
+
+    </main>
+
+    <footer class="app-footer">
+      <span id="footerBrand">CyberAudit</span>
+      <span data-i18n="footer.tagline"></span>
+    </footer>
+  </div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
