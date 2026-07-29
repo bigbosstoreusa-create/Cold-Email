@@ -81,6 +81,7 @@ android-sdk/ -e
 # Environment files
 *.env
 *.env.*
+!.env.example
 
 # CyberAudit : dossier de donnees (cles d'acces / paywall) - ne pas versionner
 /data/

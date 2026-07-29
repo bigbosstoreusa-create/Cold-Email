@@ -1,0 +1,51 @@
+# =========================================================================
+# CyberAudit - Deploiement "cle en main" pour VPS (Hostinger, OVH, Hetzner...)
+# -------------------------------------------------------------------------
+# Lance 2 services :
+#   - cyberaudit : l'application Node (port interne 4000, non expose au public)
+#   - caddy      : reverse proxy qui gere le HTTPS AUTOMATIQUEMENT (Let's Encrypt)
+#
+# Avant de lancer :
+#   1) Renseignez votre sous-domaine et votre e-mail dans le fichier "Caddyfile".
+#   2) Copiez ".env.example" en ".env" et remplissez vos valeurs.
+#   3) Lancez :  docker compose up -d
+#
+# Le volume "cyberaudit_data" conserve les cles d'acces (paywall) entre les
+# redemarrages. Le volume "caddy_data" conserve les certificats HTTPS.
+# =========================================================================
+services:
+  cyberaudit:
+    build: .
+    image: cyberaudit:latest
+    container_name: cyberaudit
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "4000"
+      HOST: "0.0.0.0"
+      DATA_DIR: "/data"
+    volumes:
+      - cyberaudit_data:/data
+    # Pas de "ports:" ici : l'app n'est joignable que par Caddy (reseau interne).
+    expose:
+      - "4000"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: cyberaudit-caddy
+    restart: unless-stopped
+    depends_on:
+      - cyberaudit
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  cyberaudit_data:
+  caddy_data:
+  caddy_config:

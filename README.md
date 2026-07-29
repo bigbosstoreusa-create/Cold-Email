@@ -155,6 +155,22 @@ docker exec cyberaudit node manage.js owner
 docker exec cyberaudit node manage.js add "Client A"
 ```
 
+## Deploiement le plus simple : docker compose + HTTPS automatique
+
+Sur un VPS (Hostinger VPS, OVH, Hetzner...), un fichier `docker-compose.yml` et un `Caddyfile` sont fournis. Caddy obtient et renouvelle le certificat HTTPS tout seul.
+
+```bash
+git clone https://github.com/bigbosstoreusa-create/Cold-Email.git
+cd Cold-Email
+git checkout claude/cyberaudit-saas-build-i5ib32
+cp .env.example .env          # puis editez .env (marque, prix, Gumroad, admin)
+nano Caddyfile                # remplacez le sous-domaine et l'e-mail
+docker compose up -d --build
+docker compose exec cyberaudit node manage.js owner   # affiche la cle proprietaire
+```
+
+Prerequis : que votre sous-domaine (enregistrement DNS `A`) pointe vers l'IP du VPS, et que les ports 80 et 443 soient ouverts.
+
 ## Mise en ligne derriere un reverse proxy (HTTPS)
 
 L'application ecoute en HTTP ; placez-la derriere un reverse proxy qui gere le TLS.

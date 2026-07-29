@@ -1,0 +1,17 @@
+# =========================================================================
+# Configuration Caddy - HTTPS automatique pour CyberAudit
+# -------------------------------------------------------------------------
+# 1) Remplacez "vous@email.com" par VOTRE adresse e-mail (Let's Encrypt).
+# 2) Remplacez "audit.votredomaine.com" par VOTRE sous-domaine.
+# Caddy obtient et renouvelle le certificat HTTPS tout seul.
+# =========================================================================
+
+# Options globales (doivent rester le tout premier bloc).
+{
+    email vous@email.com
+}
+
+audit.votredomaine.com {
+    encode gzip
+    reverse_proxy cyberaudit:4000
+}
